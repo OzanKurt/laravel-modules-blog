@@ -1,150 +1,152 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Kurt\Modules\Blog\Models;
 
-use Kurt\Modules\Blog\Observers\CommentObserver;
-
-use Kurt\Modules\Core\Traits\GetCountFromRelation;
-use Kurt\Modules\Core\Traits\GetUserModelData;
+use Database\Factories\Kurt\Modules\Blog\CommentFactory;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
+use Kurt\Modules\Blog\Enums\CommentApproval;
+use Kurt\Modules\Blog\Events\CommentApproved;
+use Kurt\Modules\Blog\Events\CommentRejected;
+use Kurt\Modules\Core\Concerns\ResolvesUser;
 
 /**
- * Class Comment
- *
- * @package Kurt\Modules\Blog\Models
- * @property integer                             $id
- * @property string                              $content
- * @property integer                             $user_id
- * @property integer                             $post_id
- * @property boolean                             $approved
- * @property \Carbon\Carbon                      $created_at
- * @property \Carbon\Carbon                      $updated_at
- * @property \Carbon\Carbon                      $deleted_at
- * @property-read \Kurt\Modules\Blog\Models\Post $post
- * @property-read \App\User                      $user
+ * @property int $id
+ * @property int $post_id
+ * @property int $user_id
+ * @property int|null $parent_id
+ * @property string $body
+ * @property CommentApproval|null $approval
+ * @property Carbon|null $approved_at
+ * @property Carbon|null $rejected_at
+ * @property int|null $approved_by
+ * @property int|null $rejected_by
  */
 class Comment extends Model
 {
-    use GetCountFromRelation;
-    use GetUserModelData;
+    /** @use HasFactory<CommentFactory> */
+    use HasFactory;
 
-    /**
-     * The database table used by the model.
-     *
-     * @var string
-     */
+    use ResolvesUser;
+    use SoftDeletes;
+
     protected $table = 'blog_comments';
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array
-     */
+    /** @var list<string> */
     protected $fillable = [
-        'content',
-        'approved',
-        'user_id',
-        'post_id',
+        'post_id', 'user_id', 'parent_id', 'body', 'approval',
+        'approved_at', 'rejected_at', 'approved_by', 'rejected_by',
     ];
 
-    /**
-     * The attributes that should be mutated to dates.
-     *
-     * @var array
-     */
-    protected $dates = [
-        'deleted_at',
-    ];
-
-    /**
-     * Casts columns to requested types.
-     * 
-     * @var array
-     */
+    /** @var array<string, string> */
     protected $casts = [
-        'approved' => 'boolean',
+        'approval' => CommentApproval::class,
+        'approved_at' => 'datetime',
+        'rejected_at' => 'datetime',
     ];
 
     /**
-     * The "booting" method of the model.
-     *
-     * @return void
+     * @return BelongsTo<Post, $this>
      */
-    public static function boot()
+    public function post(): BelongsTo
     {
-        parent::boot();
-
-        self::observe(new CommentObserver());
+        return $this->belongsTo(Post::class);
     }
 
     /**
-     * Overwrite parents create to set a default approval state.
-     * 
-     * @param static
+     * @return BelongsTo<Model, $this>
      */
-    public static function create(array $attributes = [])
+    public function user(): BelongsTo
     {
-        if (!array_key_exists('approved', $attributes)) {
-            $attributes['approved'] = config('kurt_modules.blog.preapproved_comments');
-        }
-
-        return parent::create($attributes);
+        return $this->userBelongsTo();
     }
 
     /**
-     * Post of the comment.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
+     * @return BelongsTo<Model, $this>
      */
-    public function post()
+    public function author(): BelongsTo
     {
-        return $this->belongsTo($this->getModel('post'), 'post_id', 'id');
+        return $this->user();
     }
 
     /**
-     * User that created this comment.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
+     * @return BelongsTo<self, $this>
      */
-    public function user()
+    public function parent(): BelongsTo
     {
-        return $this->belongsTo(
-            $this->getUserModelClassName(),
-            'user_id',
-            $this->getUserModelPrimaryKey()
-        );
+        return $this->belongsTo(self::class, 'parent_id');
     }
 
     /**
-     * Get is the comment is approved.
-     * 
-     * @return boolean
+     * @return HasMany<self, $this>
      */
-    public function isApproved()
+    public function replies(): HasMany
     {
-        return $this->approved;
+        return $this->hasMany(self::class, 'parent_id');
     }
 
     /**
-     * Update the comment as approved in the database.
-     * 
-     * @return $this
+     * @param  Builder<self>  $q
+     * @return Builder<self>
      */
-    public function approve($state = true)
+    public function scopeApproved(Builder $q): Builder
     {
-        $this->approved == $state;
+        return $q->where('approval', CommentApproval::Approved->value);
+    }
 
-        $this->save();
+    /**
+     * @param  Builder<self>  $q
+     * @return Builder<self>
+     */
+    public function scopePending(Builder $q): Builder
+    {
+        return $q->where('approval', CommentApproval::Pending->value);
+    }
+
+    public function isApproved(): bool
+    {
+        return $this->approval === CommentApproval::Approved;
+    }
+
+    public function approve(Model $approver): self
+    {
+        $this->forceFill([
+            'approval' => CommentApproval::Approved,
+            'approved_at' => now(),
+            'approved_by' => $approver->getKey(),
+        ])->save();
+
+        $this->refresh();
+
+        CommentApproved::dispatch($this, $approver);
 
         return $this;
     }
 
-    /**
-     * Update the comment as disapproved in the database.
-     * 
-     * @return $this
-     */
-    public function disapprove()
+    public function reject(Model $rejector): self
     {
-        return $this->approve(false);
+        $this->forceFill([
+            'approval' => CommentApproval::Rejected,
+            'rejected_at' => now(),
+            'rejected_by' => $rejector->getKey(),
+        ])->save();
+
+        $this->refresh();
+
+        CommentRejected::dispatch($this, $rejector);
+
+        return $this;
+    }
+
+    protected static function newFactory(): CommentFactory
+    {
+        return CommentFactory::new();
     }
 }

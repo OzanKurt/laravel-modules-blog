@@ -1,550 +1,252 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Kurt\Modules\Blog\Models;
 
 use Cviebrock\EloquentSluggable\Sluggable;
-
-use Kurt\Modules\Blog\Observers\PostObserver;
-
-use Kurt\Modules\Core\Traits\GetCountFromRelation;
-use Kurt\Modules\Core\Traits\GetUserModelData;
-
-use Kurt\Modules\Core\Links;
+use Database\Factories\Kurt\Modules\Blog\PostFactory;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
+use Kurt\Modules\Blog\Enums\CommentApproval;
+use Kurt\Modules\Blog\Enums\PostStatus;
+use Kurt\Modules\Blog\Enums\PostType;
+use Kurt\Modules\Blog\Support\SeoMetadata;
+use Kurt\Modules\Blog\Support\VideoSource;
+use Kurt\Modules\Blog\Support\VideoUrl;
+use Kurt\Modules\Core\Concerns\ResolvesUser;
+use Spatie\MediaLibrary\HasMedia;
+use Spatie\MediaLibrary\InteractsWithMedia;
+use Spatie\MediaLibrary\MediaCollections\Models\Media;
+use Spatie\Translatable\HasTranslations;
 
 /**
- * Class Post
- *
- * @package Kurt\Modules\Blog\Models
- * @property integer                                                                           $id
- * @property string                                                                            $title
- * @property string                                                                            $slug
- * @property string                                                                            $media
- * @property string                                                                            $content
- * @property integer                                                                           $type
- * @property integer                                                                           $user_id
- * @property integer                                                                           $category_id
- * @property \Carbon\Carbon                                                                    $created_at
- * @property \Carbon\Carbon                                                                    $updated_at
- * @property \Carbon\Carbon                                                                    $deleted_at
- * @property-read \Kurt\Modules\Blog\Models\Category                                           $category
- * @property-read \App\User                                                                    $user
- * @property-read \Illuminate\Database\Eloquent\Collection|\Kurt\Modules\Blog\Models\Comment[] $comments
- * @property-read \Kurt\Modules\Blog\Models\Comment                                            $commentsCount
- * @property-read mixed                                                                        $comments_count
- * @property-read \Kurt\Modules\Blog\Models\Comment                                            $latestComment
- * @property-read \Illuminate\Database\Eloquent\Collection|\Kurt\Modules\Blog\Models\Tag[]     $tags
- * @property-read \Kurt\Modules\Blog\Models\Tag                                                $tagsCount
- * @property-read mixed                                                                        $tags_count
- * @method static \Illuminate\Database\Query\Builder|\Kurt\Modules\Blog\Models\Post whereSlug($slug)
+ * @property int $id
+ * @property string $slug
+ * @property string $title
+ * @property string|null $excerpt
+ * @property string|null $body
+ * @property PostStatus $status
+ * @property PostType $type
+ * @property string|null $video_url
+ * @property int $user_id
+ * @property int|null $category_id
+ * @property int $view_count
+ * @property string|null $last_viewer_ip
+ * @property Carbon|null $published_at
+ * @property Carbon|null $scheduled_for
+ * @property string|null $meta_title
+ * @property string|null $meta_description
+ * @property string|null $meta_og_image
  */
-class Post extends Model
+class Post extends Model implements HasMedia
 {
-    use GetCountFromRelation;
-    use GetUserModelData;
+    /** @use HasFactory<PostFactory> */
+    use HasFactory;
+
+    use HasTranslations;
+    use InteractsWithMedia;
+    use ResolvesUser;
     use Sluggable;
+    use SoftDeletes;
 
-    /**
-     * Return the sluggable configuration array for this model.
-     *
-     * @return array
-     */
-    public function sluggable()
-    {
-        return [
-            'slug' => [
-                'source' => 'title',
-                'onUpdate' => true,
-            ]
-        ];
-    }
-
-    /**
-     * Links
-     * 
-     * @var array
-     */
-    private $links = [
-        'index'   => '/blog/categories/{category->id}/posts',
-        'create'  => '/blog/categories/{category->id}/posts/create',
-        'store'   => '/blog/categories/{category->id}/posts',
-        'show'    => '/blog/categories/{category->id}/posts/{id}',
-        'edit'    => '/blog/categories/{category->id}/posts/{id}/edit',
-        'update'  => '/blog/categories/{category->id}/posts/{id}',
-        'destroy' => '/blog/categories/{category->id}/posts/{id}',
-    ];
-
-    /**
-     * The database table used by the model.
-     *
-     * @var string
-     */
     protected $table = 'blog_posts';
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array
-     */
+    /** @var list<string> */
+    public array $translatable = ['title', 'excerpt', 'body', 'meta_title', 'meta_description'];
+
+    /** @var list<string> */
     protected $fillable = [
-        'title',
-        'slug',
-        'type',
-        'media',
-        'content',
-        'view_count',
-        'last_viewer_ip',
-        'user_id',
-        'category_id',
-        'published_at',
+        'slug', 'title', 'excerpt', 'body', 'status', 'type', 'video_url',
+        'user_id', 'category_id', 'view_count', 'last_viewer_ip',
+        'published_at', 'scheduled_for',
+        'meta_title', 'meta_description', 'meta_og_image',
+    ];
+
+    /** @var array<string, string> */
+    protected $casts = [
+        'status' => PostStatus::class,
+        'type' => PostType::class,
+        'published_at' => 'datetime',
+        'scheduled_for' => 'datetime',
+        'view_count' => 'integer',
     ];
 
     /**
-     * The attributes that should be mutated to dates.
-     *
-     * @var array
+     * @return array<string, array<string, mixed>>
      */
-    protected $dates = [
-        'published_at',
-        'deleted_at',
-    ];
-
-    /**
-     * Post types as an array.
-     *
-     * @var array
-     */
-    public static $types = [
-        0 => Post::TYPE_TEXT,
-        1 => Post::TYPE_IMAGE,
-        2 => Post::TYPE_VIDEO,
-        3 => Post::TYPE_CAROUSEL,
-    ];
-
-    protected $appends = [
-        'links',
-    ];
-
-    /**
-     * The `media` column will be null.
-     */
-    const TYPE_TEXT = 0;
-
-    /**
-     * The `media` column will be a `string`.
-     */
-    const TYPE_IMAGE = 1;
-
-    /**
-     * The `media` column will be a `string`.
-     */
-    const TYPE_VIDEO = 2;
-
-    /**
-     * The `media` column will be a `string[]`.
-     */
-    const TYPE_CAROUSEL = 3;
-
-    /**
-     * Video types as an array.
-     *
-     * @var array
-     */
-    public static $videoTypes = [
-        0 => Post::VIDEO_TYPE_YOUTUBE,
-        1 => Post::VIDEO_TYPE_VIMEO,
-        2 => Post::VIDEO_TYPE_DAILYMOTION,
-    ];
-
-    /**
-     * The `videoType` attribute.
-     */
-    const VIDEO_TYPE_YOUTUBE = 0;
-    const VIDEO_TYPE_VIMEO = 1;
-    const VIDEO_TYPE_DAILYMOTION = 2;
-
-    protected $with = [
-        // 'category',
-    ];
-
-    /**
-     * The "booting" method of the model.
-     *
-     * @return void
-     */
-    public static function boot()
+    public function sluggable(): array
     {
-        parent::boot();
-
-        self::observe(new PostObserver());
-    }
-
-    public function getLinksAttribute()
-    {
-        return new Links($this, $this->links);
+        return ['slug' => ['source' => 'title', 'onUpdate' => true]];
     }
 
     /**
-     * Get category belongs to relation.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
+     * @return BelongsTo<Category, $this>
      */
-    public function category()
+    public function category(): BelongsTo
     {
-        return $this->belongsTo($this->getModel('category'), 'category_id', 'id');
+        return $this->belongsTo(Category::class);
     }
 
     /**
-     * User that created the post.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
+     * @return BelongsTo<Model, $this>
      */
-    public function user()
+    public function user(): BelongsTo
     {
-        return $this->belongsTo(
-            $this->getUserModelClassName(),
-            'user_id',
-            $this->getUserModelPrimaryKey()
-        );
+        return $this->userBelongsTo();
     }
 
     /**
-     * Get comments has many relation.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany
+     * @return BelongsTo<Model, $this>
      */
-    public function comments()
+    public function author(): BelongsTo
     {
-        return $this->hasMany($this->getModel('comment'), 'post_id', 'id');
+        return $this->user();
     }
 
     /**
-     * Get comments count has one relation.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\HasOne
+     * @return HasMany<Comment, $this>
      */
-    public function commentsCount()
+    public function comments(): HasMany
     {
-        return $this->hasOne($this->getModel('comment'))
-            ->selectRaw('post_id, count(*) as aggregate')
-            ->groupBy('post_id');
+        return $this->hasMany(Comment::class);
     }
 
     /**
-     * Get comments count attribute.
-     *
-     * @param $value
-     *
-     * @return int
+     * @return HasMany<Comment, $this>
      */
-    public function getCommentsCountAttribute($value)
+    public function approvedComments(): HasMany
     {
-        return $this->getCountFromRelation('commentsCount', $value);
+        return $this->comments()->where('approval', CommentApproval::Approved->value);
     }
 
     /**
-     * Get latest comment has one relation.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\HasOne
+     * @return BelongsToMany<Tag, $this>
      */
-    public function latestComment()
+    public function tags(): BelongsToMany
     {
-        return $this->hasOne($this->getModel('comment'), 'post_id', 'id')->latest();
+        return $this->belongsToMany(Tag::class, 'blog_post_tag', 'post_id', 'tag_id')->withTimestamps();
+    }
+
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection('cover')->singleFile();
+        $this->addMediaCollection('social')->singleFile();
+        $this->addMediaCollection('carousel');
+    }
+
+    public function registerMediaConversions(?Media $media = null): void
+    {
+        $thumb = $this->addMediaConversion('thumb');
+        $thumb->width(320);
+        $thumb->height(320);
+        $thumb->nonQueued();
+
+        $cover = $this->addMediaConversion('cover');
+        $cover->width(1200);
+        $cover->height(630);
+        $cover->nonQueued();
     }
 
     /**
-     * Get tags belongs to many relation.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany
+     * @param  Builder<self>  $q
+     * @return Builder<self>
      */
-    public function tags()
+    public function scopePublished(Builder $q): Builder
     {
-        return $this->belongsToMany($this->getModel('tag'), 'blog_post_tag', 'post_id', 'tag_id');
+        return $q->where('status', PostStatus::Published->value)->where('published_at', '<=', now());
     }
 
     /**
-     * Get tags count has one relation.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\HasOne
+     * @param  Builder<self>  $q
+     * @return Builder<self>
      */
-    public function tagsCount()
+    public function scopeScheduled(Builder $q): Builder
     {
-        return $this->hasOne($this->getModel('tag'))
-            ->selectRaw('post_id, count(*) as aggregate')
-            ->groupBy('post_id');
+        return $q->where('status', PostStatus::Scheduled->value);
     }
 
     /**
-     * Get tags count attribute.
-     *
-     * @param int $value
-     *
-     * @return int
+     * @param  Builder<self>  $q
+     * @return Builder<self>
      */
-    public function getTagsCountAttribute($value)
+    public function scopeDrafts(Builder $q): Builder
     {
-        return $this->getCountFromRelation('tagsCount', $value);
+        return $q->where('status', PostStatus::Draft->value);
     }
 
     /**
-     * Popularity by view count.
-     * 
-     * @param  [type]  $query      [description]
-     * @param  boolean $descending [description]
-     * 
-     * @return [type]              [description]
+     * @param  Builder<self>  $q
+     * @return Builder<self>
      */
-    public function scopePopular($query, $descending = true)
+    public function scopeArchived(Builder $q): Builder
     {
-        $query->orderBy('view_count', $descending ? 'desc' : 'asc');
+        return $q->where('status', PostStatus::Archived->value);
     }
 
     /**
-     * [scopeInCategory description]
-     * 
-     * @param  [type] $query      [description]
-     * @param  [type] $categoryId [description]
-     * 
-     * @return [type]        [description]
+     * @param  Builder<self>  $q
+     * @return Builder<self>
      */
-    public function scopeInCategory($query, $categoryId)
+    public function scopePopular(Builder $q, bool $desc = true): Builder
     {
-        $query->where('category_id', '=', $categoryId);
+        return $q->orderBy('view_count', $desc ? 'desc' : 'asc');
     }
 
     /**
-     * [scopeWithTags description]
-     * 
-     * @param  [type]  $query [description]
-     * @param  array   $tagIds   Tag id's
-     * @param  boolean $and   If `true` posts should have all the given tags
-     * 
-     * @return [type]         [description]
+     * @param  Builder<self>  $q
+     * @return Builder<self>
      */
-    public function scopeWithTags($query, $tagIds = [], $and = false)
+    public function scopeInCategory(Builder $q, Category|int $category): Builder
     {
-        if (!is_array($tagIds)) {
-            $tagIds = [$tagIds];
-        }
-        
-        $query->join('blog_post_tag', 'blog_posts.id', '=', 'blog_post_tag.post_id')
-            ->whereIn('blog_post_tag.tag_id', $tagIds)
-            ->groupBy('blog_post_tag.post_id')
-            ->havingRaw('COUNT(DISTINCT `blog_post_tag`.`tag_id`) = ?', [
-                count($tagIds)
-            ]);
+        return $q->where('category_id', is_int($category) ? $category : $category->getKey());
     }
 
     /**
-     * Determine if the posts media type is equal to the given type.
-     * 
-     * @param  int  $type One of the constants from this class.
-     * 
-     * @return boolean
+     * @param  Builder<self>  $q
+     * @param  array<int, int>|int  $tagIds
+     * @return Builder<self>
      */
-    public function isMediaType($type)
+    public function scopeWithTags(Builder $q, array|int $tagIds, bool $matchAll = false): Builder
     {
-        return $this->type == $type;
+        $ids = is_array($tagIds) ? $tagIds : [$tagIds];
+
+        return $matchAll
+            ? $q->whereHas('tags', fn ($t) => $t->whereIn('blog_tags.id', $ids), '=', count($ids))
+            : $q->whereHas('tags', fn ($t) => $t->whereIn('blog_tags.id', $ids));
     }
 
     /**
-     * Get the media value in a better and fitting type. 
-     * 
-     * @param  string $value
-     * 
-     * @return mixed
+     * @param  Builder<self>  $q
+     * @return Builder<self>
      */
-    public function getMediaAttribute($value)
+    public function scopeAuthoredBy(Builder $q, Model|int $user): Builder
     {
-        switch ($this->type) {
-            case self::TYPE_TEXT:
-                return null;
-                break;
-            case self::TYPE_IMAGE:
-                return $value;
-                break;
-            case self::TYPE_VIDEO:
-                return $value;
-                break;
-            case self::TYPE_CAROUSEL:
-                return json_decode($value, true);
-                break;
-            default:
-                throw new \Exception("Posts media type is invalid.");
-                break;
-        }
+        return $q->where('user_id', $user instanceof Model ? $user->getKey() : $user);
     }
 
-    /**
-     * Set the media value in a better and fitting type. 
-     * 
-     * @param  mixed $value
-     */
-    public function setMediaAttribute($value)
+    public function videoSource(): ?VideoSource
     {
-        switch ($this->type) {
-            case self::TYPE_TEXT:
-                $result = null;
-                break;
-            case self::TYPE_IMAGE:
-                $result = $value;
-                break;
-            case self::TYPE_VIDEO:
-                $result = $value;
-                break;
-            case self::TYPE_CAROUSEL:
-                $result = json_encode($value);
-                break;
-            default:
-                throw new \Exception("Posts media type is invalid.");
-                break;
+        if ($this->type !== PostType::Video || $this->video_url === null) {
+            return null;
         }
 
-        $this->attributes['media'] = $result;
+        return VideoUrl::parse($this->video_url);
     }
 
-    /**
-     * Get the thumbnail image path of the post.
-     * 
-     * @return string|null
-     */
-    public function getThumbnailAttribute()
+    public function seo(): SeoMetadata
     {
-        switch ($this->type) {
-            case self::TYPE_TEXT:
-                $result = null;
-                break;
-            case self::TYPE_IMAGE:
-                $result = $this->media;
-                break;
-            case self::TYPE_VIDEO:
-                $result = $this->getVideoThumbnail();
-                break;
-            case self::TYPE_CAROUSEL:
-                $result = $this->media[0];
-                break;
-            default:
-                throw new \Exception("Invalid media type.");
-                break;
-        }
-
-        return $result;
+        return SeoMetadata::forPost($this);
     }
 
-    /**
-     * Get the thumbnail of youtube video.
-     * 
-     * @return string|null Thumbnail URL.
-     */
-    public function getVideoTypeAttribute()
+    protected static function newFactory(): PostFactory
     {
-        if ($this->type != self::TYPE_VIDEO) {
-            throw new \Exception("This posts media type is not `Video`, cannot get `videoType`.");
-        }
-        
-        if (getDailyMotionId($this->media)) {
-            return self::VIDEO_TYPE_DAILYMOTION;
-        } elseif (getVimeoId($this->media)) {
-            return self::VIDEO_TYPE_VIMEO;
-        } elseif (getYoutubeId($this->media)) {
-            return self::VIDEO_TYPE_YOUTUBE;
-        }
-    }
-
-    /**
-     * Get the video id of the post.
-     * 
-     * @return string
-     */
-    public function getVideoIdAttribute()
-    {
-        switch ($this->videoType) {
-            case self::VIDEO_TYPE_DAILYMOTION:
-                return getDailyMotionId($this->media);
-                break;
-            case self::VIDEO_TYPE_VIMEO:
-                return getVimeoId($this->media);
-                break;
-            case self::VIDEO_TYPE_YOUTUBE:
-                return getYoutubeId($this->media);
-                break;
-            default:
-                throw new \Exception("This posts video type is not valid.");
-                break;
-        }
-    }
-
-    /**
-     * Get the video thumbnail of the post.
-     * 
-     * @return string
-     */
-    private function getVideoThumbnail()
-    {
-        $qualities = config('kurt_modules.blog.video_thumbnail_qualities');
-
-        switch ($this->videoType) {
-            case self::VIDEO_TYPE_DAILYMOTION:
-                return 'http://www.dailymotion.com/thumbnail/video/' . $this->videoId;
-                break;
-            case self::VIDEO_TYPE_VIMEO:
-                $result = file_get_contents('http://vimeo.com/api/v2/video/' . $this->videoId . '.php');
-
-                $hash = unserialize($result);
-
-                return $hash[0][$qualities['vimeo']];
-                break;
-            case self::VIDEO_TYPE_YOUTUBE:
-                return 'http://img.youtube.com/vi/' . $this->videoId . '/' . $qualities['youtube'] . '.jpg';
-                break;
-            default:
-                throw new \Exception("This posts video type is not valid.");
-                break;
-        }
-    }
-
-    /**
-     * Get video location url.
-     * 
-     * @return string Url of the video.
-     */
-    public function getVideoLocationAttribute()
-    {
-        switch ($this->videoType) {
-            case self::VIDEO_TYPE_DAILYMOTION:
-                return 'http://www.dailymotion.com/embed/video/' . $this->videoId;
-                break;
-            case self::VIDEO_TYPE_VIMEO:
-                return 'http://player.vimeo.com/video/' . $this->videoId;
-                break;
-            case self::VIDEO_TYPE_YOUTUBE:
-                return 'http://www.youtube.com/embed/' . $this->videoId;
-                break;
-            default:
-                throw new \Exception("This posts video type is not valid.");
-                break;
-        }
-    }
-
-    /**
-     * Get the html to embed the video.
-     * 
-     * @return string
-     */
-    public function getVideoEmbedAttribute()
-    {
-        $html = "<style>
-                .embed-container { 
-                    position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; max-width: 100%; } 
-                .embed-container iframe, .embed-container object, .embed-container embed { 
-                    position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-                </style>";
-
-        $html .= "<div class='embed-container'>
-                    <iframe src=" . $this->videoLocation . " frameborder='0' 
-                        awebkitAllowFullScreen mozallowfullscreen llowfullscreen
-                    ></iframe>
-                </div>";
-
-        return $html;
+        return PostFactory::new();
     }
 }

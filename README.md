@@ -1,64 +1,41 @@
-# KurtModules-Blog
+# laravel-modules-blog
 
-I tried to extract a simple, reusable blog module to use on my projects.
-I used two external packages in total. For keeping the URL pretty on every possible page, I added [Eloquent Sluggable](https://github.com/cviebrock/eloquent-sluggable) and for displaying the content of a post I decided to use [Laravel Markdown](https://github.com/GrahamCampbell/Laravel-Markdown). This can of course be overwritten. 
+Headless blog module for Laravel: posts, categories, tags, comments, scheduled publishing, SEO meta, translatable content, Spatie medialibrary.
 
-The module includes the following models and each model has a default observer:
+## Requirements
 
-PS: Observers are currently not customizable. :(
+- PHP 8.4+
+- Laravel 12.x or 13.x
+- `ozankurt/laravel-modules-core` v2.x
 
-#### Category
+## Installation
 
-| Methods       | Description   |
-| ------------- | ------------- |
-| posts() | Posts of the category. (hasMany) |
-| postsCount() | Posts count of the category. (hasOne) |
-| latestPost() | Latest post of the category. (hasOne)      |
-| scopePopular($descending = true) | Order the categories accoring to their popularities. (scope)      |
+```bash
+composer require ozankurt/laravel-modules-blog
+```
 
-#### Tag
+Publish config and migrations:
 
-| Methods       | Description   |
-| ------------- | ------------- |
-| posts() | Posts of the tag. (belongsToMany) |
-| postsCount() | Posts count of the tag. (hasOne) |
-| latestPost() | Latest post of the tag. |
+```bash
+php artisan vendor:publish --tag=blog-config
+php artisan vendor:publish --tag=blog-migrations
+php artisan migrate
+```
 
-#### Post
+## What it provides
 
-Posts have a media type attribute so that the users can choose between a Text Post, Single Image Post, Multiple Image Post or Video Post. Videos support 3 different websites: YouTube, Vimeo, DailyMotion
+- `Kurt\Modules\Blog\Models\Post` — with translatable title/excerpt/body/meta_*, status enum (Draft/Scheduled/Published/Archived), type enum (Text/Image/Video/Carousel), scopes (`published`, `scheduled`, `drafts`, `popular`, `inCategory`, `withTags`, `authoredBy`).
+- `Category`, `Tag`, `Comment` models with their relations and scopes.
+- `BlogAuthor` contract + `IsBlogAuthor` trait for your User model.
+- `Kurt\Modules\Blog\Support\VideoUrl::parse()` for YouTube / Vimeo / DailyMotion URL parsing.
+- `Kurt\Modules\Blog\Support\SeoMetadata::forPost()` for SEO meta resolution.
+- Console commands: `blog:publish-due`, `blog:upgrade-translations`, `blog:demo`.
+- Domain events: `PostCreated`, `PostUpdated`, `PostPublished`, `PostArchived`, `CommentCreated`, `CommentApproved`, `CommentRejected`, ...
 
-| Methods       | Description   |
-| ------------- | ------------- |
-| category() | Category of the post. (belongsTo) |
-| user() | User of the post. (belongsTo) |
-| comments() | Comments of the post. (hasMany)      |
-| commentsCount() | Comments count of the post. (hasOne) |
-| latestComment() | Latest comment of the post. |
-| tags() | Tags of the post. (belongsToMany) |
-| tagsCount() | Tag count of the post. (hasOne) |
-| scopePopular($descending = true) | Order the categories accoring to their popularities. (scope)      |
-| scopeInCategory($categoryId = true) | Filter the posts to a category. (scope)* |
-| scopeWithTags($tagIds = [], $and = false) | Filter the posts by their tags. (scope)* |
+## Filament
 
-PS: * *This should be able to receive multiple ids sometime.*
+Filament v3/v4/v5 admin resources are planned for v2.1. The package is headless in v2.0.
 
-#### Comment
+## License
 
-| Methods       | Description   |
-| ------------- | ------------- |
-| post() | Post of the comment. (belongsTo) |
-| user() | User of the comment. (belongsTo) |
-| isApproved() | Check the approval state of the comment. |
-| approve($state = true) | Update the appvoval of the comment. |
-| disapprove() | Update the appvoval of the comment. |
-
-### Contribution guidelines
-
-Todo: Add contribution guidelines.
-
-### Who do I talk to?
-
-**Owner**: 
-
-* Ozan Kurt (<ozankurt2@gmail.com>)
+MIT (c) Ozan Kurt

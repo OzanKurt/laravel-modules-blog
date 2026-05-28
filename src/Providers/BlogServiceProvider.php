@@ -1,303 +1,77 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Kurt\Modules\Blog\Providers;
 
-use Carbon\Carbon;
-use Faker\Generator as Faker;
-use Illuminate\Support\Facades\Route;
-use Illuminate\Foundation\AliasLoader;
-use Illuminate\Database\Eloquent\Factory;
-use Illuminate\Foundation\Support\Providers\RouteServiceProvider as ServiceProvider;
-
-use Kurt\Modules\Blog\Console\Commands\SeedCommand;
+use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Contracts\Auth\Access\Gate;
+use Kurt\Modules\Blog\Console\Commands\DemoCommand;
+use Kurt\Modules\Blog\Console\Commands\PublishDuePostsCommand;
+use Kurt\Modules\Blog\Console\Commands\UpgradeTranslationsCommand;
 use Kurt\Modules\Blog\Models\Category;
+use Kurt\Modules\Blog\Models\Comment;
 use Kurt\Modules\Blog\Models\Post;
+use Kurt\Modules\Blog\Models\Tag;
+use Kurt\Modules\Blog\Observers\CategoryObserver;
+use Kurt\Modules\Blog\Observers\CommentObserver;
+use Kurt\Modules\Blog\Observers\PostObserver;
+use Kurt\Modules\Blog\Observers\TagObserver;
+use Kurt\Modules\Blog\Policies\CategoryPolicy;
+use Kurt\Modules\Blog\Policies\CommentPolicy;
+use Kurt\Modules\Blog\Policies\PostPolicy;
+use Kurt\Modules\Blog\Policies\TagPolicy;
+use Kurt\Modules\Core\Providers\PackageServiceProvider;
+use Spatie\LaravelPackageTools\Package;
 
-use Kurt\Modules\Blog\Repositories\Contracts\CategoriesRepositoryInterface;
-use Kurt\Modules\Blog\Repositories\Contracts\PostsRepositoryInterface;
-use Kurt\Modules\Blog\Repositories\Contracts\TagsRepositoryInterface;
-
-use Kurt\Modules\Blog\Repositories\Categories\CachingCategoriesRepository;
-use Kurt\Modules\Blog\Repositories\Categories\EloquentCategoriesRepository;
-use Kurt\Modules\Blog\Repositories\Posts\EloquentPostsRepository;
-use Kurt\Modules\Blog\Repositories\Tags\EloquentTagsRepository;
-
-use Kurt\Modules\Core\Traits\GetUserModelData;
-
-use GrahamCampbell\Markdown\Facades\Markdown;
-use GrahamCampbell\Markdown\MarkdownServiceProvider;
-
-class BlogServiceProvider extends ServiceProvider
+final class BlogServiceProvider extends PackageServiceProvider
 {
-    use GetUserModelData;
-
-    /**
-     * Default namespace for blog routes.
-     *
-     * @var string
-     */
-    protected $namespace = 'App\Http\Controllers';
-
-    /**
-     * Base path of blog module.
-     *
-     * @var string
-     */
-    protected $basePath = __DIR__.'/../..';
-
-    /**
-     * Source path of blog module.
-     *
-     * @var string
-     */
-    protected $sourcePath = __DIR__.'/..';
-
-    /**
-     * Define your route model bindings, pattern filters, etc.
-     *
-     * @return void
-     */
-    public function boot()
+    protected function module(): string
     {
-        //
-
-        parent::boot();
+        return 'blog';
     }
 
-    /**
-     * Register any application services.
-     *
-     * @return void
-     */
-    public function register()
+    public function configurePackage(Package $package): void
     {
-        $this->initConfig();
-
-        $this->publishVendor();
-
-        $this->registerRepositories();
-
-        $this->registerFactories();
-
-        $this->registerCommands();
-
-        $this->registerVendors();
+        $package
+            ->name('laravel-modules-blog')
+            ->hasConfigFile('blog')
+            ->hasTranslations()
+            ->hasMigrations([
+                'create_blog_categories_table',
+                'create_blog_tags_table',
+                'create_blog_posts_table',
+                'create_blog_post_tag_table',
+                'create_blog_comments_table',
+            ])
+            ->hasCommands([
+                PublishDuePostsCommand::class,
+                UpgradeTranslationsCommand::class,
+                DemoCommand::class,
+            ]);
     }
 
-    /**
-     * Merge configurations with the default config file.
-     *
-     * @return void
-     */
-    private function initConfig()
+    public function packageBooted(): void
     {
-        $this->mergeConfigFrom($this->basePath.'/config/kurt_modules.php', 'kurt_modules');
-    }
+        Post::observe(PostObserver::class);
+        Comment::observe(CommentObserver::class);
+        Category::observe(CategoryObserver::class);
+        Tag::observe(TagObserver::class);
 
-    /**
-     * Publish required files.
-     *
-     * @return void
-     */
-    private function publishVendor()
-    {
-        $this->publishConfigurations();
+        /** @var Gate $gate */
+        $gate = $this->app->make(Gate::class);
+        $gate->policy(Post::class, PostPolicy::class);
+        $gate->policy(Comment::class, CommentPolicy::class);
+        $gate->policy(Category::class, CategoryPolicy::class);
+        $gate->policy(Tag::class, TagPolicy::class);
 
-        $this->publishRoutes();
-
-        $this->publishMigrations();
-    }
-
-    /**
-     * Register repositories.
-     *
-     * @return void
-     */
-    private function registerRepositories()
-    {
-        $this->app->bind(CategoriesRepositoryInterface::class, function() {
-            return $this->instantiateCategoriesRepository();
-        });
-        $this->app->bind(PostsRepositoryInterface::class, EloquentPostsRepository::class);
-        $this->app->bind(TagsRepositoryInterface::class, EloquentTagsRepository::class);
-    }
-
-    /**
-     * Instantiate categories repository.
-     *
-     * @return \Kurt\Modules\Blog\Repositories\Categories\CachingCategoriesRepository|\Kurt\Modules\Blog\Repositories\Categories\EloquentCategoriesRepository
-     */
-    private function instantiateCategoriesRepository()
-    {
-        $eloquentCategoriesRepository = new EloquentCategoriesRepository(new Category());
-
-        if ($this->getBlogDebug() || !$this->getBlogCache()) {
-            return $eloquentCategoriesRepository;
+        if ($this->app->runningInConsole() && (bool) config('blog.scheduler.enabled', true)) {
+            $this->app->booted(function () {
+                /** @var Schedule $schedule */
+                $schedule = $this->app->make(Schedule::class);
+                $schedule->command(PublishDuePostsCommand::class)
+                    ->cron((string) config('blog.scheduler.cron', '* * * * *'));
+            });
         }
-
-        $cachingCategoriesRepository = new CachingCategoriesRepository(
-            $this->app->make('cache.store'),
-            $eloquentCategoriesRepository
-        );
-
-        return $cachingCategoriesRepository;
-    }
-
-    private function registerFactories()
-    {
-        $factory = $this->app->make(Factory::class);
-        
-        $factory->define(Category::class, function(Faker $faker) {
-            $name = $faker->colorName;
-            return [
-                'name' => $name,
-                'slug' => str_slug($name),
-            ];
-        });
-        
-        $factory->define(Post::class, function(Faker $faker) {
-            $userIds = $this->getUserModel()->lists('id')->toArray();
-            $categoryIds = Category::lists('id')->toArray();
-
-            $name = $faker->realText(40);
-
-            return [
-                'title' => $name,
-                'slug' => str_slug($name),
-                'type' => Post::TYPE_TEXT,
-                'content' => $faker->realText(400),
-                'user_id' => $faker->randomElement($userIds),
-                'category_id' => $faker->randomElement($categoryIds),
-                'published_at' => Carbon::now()->addDays(rand(0, 2)),
-            ];
-        });
-    }
-
-    private function registerCommands()
-    {
-        $this->app->singleton('command.kurtmodules-blog.seed', function () {
-            return new SeedCommand();
-        });
-
-        $this->commands('command.kurtmodules-blog.seed');
-    }
-
-    public function registerVendors()
-    {
-        $this->app->register(MarkdownServiceProvider::class);
-
-        $loader = AliasLoader::getInstance();
-
-        $loader->alias('Markdown', Markdown::class);
-    }
-
-    /**
-     * Publish configurations.
-     *
-     * @return void
-     */
-    private function publishConfigurations()
-    {
-        $this->publishes([
-            $this->basePath.'/config/kurt_modules.php' => config_path('kurt_modules.php'),
-        ], 'config');
-    }
-
-    /**
-     * Publish routes.
-     *
-     * @return void
-     */
-    private function publishRoutes()
-    {
-        $this->publishes([
-            $this->sourcePath.'/Http/blogRoutes.php' => $this->getBlogRoutesPath(),
-        ], 'routes');
-    }
-
-    /**
-     * Publish migrations.
-     *
-     * @return void
-     */
-    private function publishMigrations()
-    {
-        $this->publishes([
-            $this->basePath.'/database/migrations/' => base_path('database/migrations'),
-        ], 'migrations');
-    }
-
-    /**
-     * Define the routes for the application.
-     *
-     * @return void
-     */
-    public function map()
-    {
-        $blogRoutesPath = $this->getBlogRoutesPath();
-
-        if (!$this->app->routesAreCached()) {
-            if ($this->routesArePublished($blogRoutesPath)) {
-                Route::group([
-                    'namespace' => $this->namespace,
-                ], function ($router) use ($blogRoutesPath) {
-                    require $blogRoutesPath;
-                });
-            } else {
-                // $this->app->make('log')->error('KurtModules-Blog routes file is not published.');
-            }
-        }
-    }
-
-    /**
-     * Get the `debug` from configurations.
-     *
-     * @return string
-     */
-    private function getBlogDebug()
-    {
-        return $this->app->make('config')->get('kurt_modules.debug');
-    }
-
-    /**
-     * Get the `cache` from configurations.
-     *
-     * @return string
-     */
-    private function getBlogCache()
-    {
-        return $this->app->make('config')->get('kurt_modules.blog.cache');
-    }
-
-    /**
-     * Get the `kurt_modules.blog.routes_path` from configurations.
-     *
-     * @return string
-     */
-    private function getBlogRoutesPath()
-    {
-        return $this->app->make('config')->get('kurt_modules.blog.routes_path');
-    }
-
-    /**
-     * Determine if the routes file is published.
-     *
-     * @param $blogRoutesPath
-     *
-     * @return bool
-     */
-    private function routesArePublished($blogRoutesPath)
-    {
-        return file_exists($blogRoutesPath);
-    }
-
-    /**
-     * Get the services provided by the provider.
-     *
-     * @return array
-     */
-    public function provides()
-    {
-        return ['command.kurtmodules-blod.seed'];
     }
 }

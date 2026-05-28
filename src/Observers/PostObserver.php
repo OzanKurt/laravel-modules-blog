@@ -1,49 +1,33 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Kurt\Modules\Blog\Observers;
 
-class PostObserver extends AbstractObserver
+use Kurt\Modules\Blog\Enums\PostStatus;
+use Kurt\Modules\Blog\Events\PostArchived;
+use Kurt\Modules\Blog\Events\PostCreated;
+use Kurt\Modules\Blog\Events\PostPublished;
+use Kurt\Modules\Blog\Events\PostUpdated;
+use Kurt\Modules\Blog\Models\Post;
+
+final class PostObserver
 {
-    
-    public function created($post)
+    public function created(Post $post): void
     {
-        //
+        PostCreated::dispatch($post);
     }
 
-    public function creating($post)
+    public function updated(Post $post): void
     {
-        //
-    }
+        PostUpdated::dispatch($post);
 
-    public function saved($post)
-    {
-        //
-    }
-
-    public function saving($post)
-    {
-        //
-    }
-
-    public function updated($post)
-    {
-        //
-    }
-
-    public function updating($post)
-    {
-        //
-    }
-
-    public function deleted($post)
-    {
-        //
-    }
-
-    public function deleting($post)
-    {
-        if (!$this->modelUsesSoftDeletes($post)) {
-            $post->comments()->delete();
+        if ($post->wasChanged('status')) {
+            match ($post->status) {
+                PostStatus::Published => PostPublished::dispatch($post),
+                PostStatus::Archived => PostArchived::dispatch($post),
+                default => null,
+            };
         }
     }
 }

@@ -1,132 +1,59 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Kurt\Modules\Blog\Models;
 
 use Cviebrock\EloquentSluggable\Sluggable;
-
-use Kurt\Modules\Blog\Observers\TagObserver;
-
-use Kurt\Modules\Core\Traits\GetCountFromRelation;
-use Kurt\Modules\Core\Traits\GetUserModelData;
+use Database\Factories\Kurt\Modules\Blog\TagFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Spatie\Translatable\HasTranslations;
 
 /**
- * Class Tag
- *
- * @package Kurt\Modules\Blog\Models
- * @property integer                                                                        $id
- * @property string                                                                         $name
- * @property string                                                                         $slug
- * @property string                                                                         $color
- * @property \Carbon\Carbon                                                                 $created_at
- * @property \Carbon\Carbon                                                                 $updated_at
- * @property \Carbon\Carbon                                                                 $deleted_at
- * @property-read \Illuminate\Database\Eloquent\Collection|\Kurt\Modules\Blog\Models\Post[] $posts
- * @property-read \Kurt\Modules\Blog\Models\Post                                            $postsCount
- * @property-read mixed                                                                     $posts_count
- * @method static \Illuminate\Database\Query\Builder|\Kurt\Modules\Blog\Models\Tag whereSlug($slug)
+ * @property int $id
+ * @property string $slug
+ * @property string $name
+ * @property string|null $description
+ * @property string|null $color
  */
 class Tag extends Model
 {
-    use GetCountFromRelation;
-    use GetUserModelData;
+    /** @use HasFactory<TagFactory> */
+    use HasFactory;
+
+    use HasTranslations;
     use Sluggable;
+    use SoftDeletes;
 
-    /**
-     * Return the sluggable configuration array for this model.
-     *
-     * @return array
-     */
-    public function sluggable()
-    {
-        return [
-            'slug' => [
-                'source' => 'name',
-                'onUpdate' => true,
-            ]
-        ];
-    }
-
-    /**
-     * The database table used by the model.
-     *
-     * @var string
-     */
     protected $table = 'blog_tags';
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array
-     */
-    protected $fillable = [
-        'name',
-        'slug',
-        'color',
-    ];
+    /** @var list<string> */
+    public array $translatable = ['name', 'description'];
+
+    /** @var list<string> */
+    protected $fillable = ['slug', 'name', 'description', 'color'];
 
     /**
-     * The attributes that should be mutated to dates.
-     *
-     * @var array
+     * @return array<string, array<string, mixed>>
      */
-    protected $dates = [
-        'deleted_at',
-    ];
-
-    /**
-     * The "booting" method of the model.
-     *
-     * @return void
-     */
-    public static function boot()
+    public function sluggable(): array
     {
-        parent::boot();
-
-        self::observe(new TagObserver());
+        return ['slug' => ['source' => 'name', 'onUpdate' => true]];
     }
 
     /**
-     * Posts of the tag.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany
+     * @return BelongsToMany<Post, $this>
      */
-    public function posts()
+    public function posts(): BelongsToMany
     {
-        return $this->belongsToMany($this->getModel('post'), 'blog_post_tag', 'tag_id', 'post_id');
+        return $this->belongsToMany(Post::class, 'blog_post_tag', 'tag_id', 'post_id')->withTimestamps();
     }
 
-    /**
-     * Posts count as hasOne relation.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\HasOne
-     */
-    public function postsCount()
+    protected static function newFactory(): TagFactory
     {
-        return $this->hasOne($this->getModel('post'))
-            ->selectRaw('tag_id, count(*) as aggregate')
-            ->groupBy('tag_id');
+        return TagFactory::new();
     }
-
-    /**
-     * Posts count of the category.
-     *
-     * @param $value
-     *
-     * @return int
-     */
-    public function getPostsCountAttribute($value)
-    {
-        return $this->getCountFromRelation('postsCount', $value);
-    }
-
-    /**
-     * Latest post of the tag.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\HasOne
-     */
-    public function latestPost()
-    {
-        return $this->posts()->latest()->first();
-    }
-
 }

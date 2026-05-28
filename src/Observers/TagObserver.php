@@ -1,50 +1,28 @@
 <?php
 
+declare(strict_types=1);
 
 namespace Kurt\Modules\Blog\Observers;
 
-class TagObserver extends AbstractObserver
+use Kurt\Modules\Blog\Events\TagCreated;
+use Kurt\Modules\Blog\Events\TagDeleted;
+use Kurt\Modules\Blog\Events\TagUpdated;
+use Kurt\Modules\Blog\Models\Tag;
+
+final class TagObserver
 {
-    
-    public function created($tag)
+    public function created(Tag $tag): void
     {
-        //
+        TagCreated::dispatch($tag);
     }
 
-    public function creating($tag)
+    public function updated(Tag $tag): void
     {
-        //
+        TagUpdated::dispatch($tag);
     }
 
-    public function saved($tag)
+    public function deleted(Tag $tag): void
     {
-        //
-    }
-
-    public function saving($tag)
-    {
-        //
-    }
-
-    public function updated($tag)
-    {
-        //
-    }
-
-    public function updating($tag)
-    {
-        //
-    }
-
-    public function deleted($tag)
-    {
-        //
-    }
-
-    public function deleting($tag)
-    {
-        if (!$this->modelUsesSoftDeletes($tag)) {
-            $tag->posts()->sync([]);
-        }
+        TagDeleted::dispatch($tag);
     }
 }

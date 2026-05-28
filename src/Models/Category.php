@@ -1,138 +1,87 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Kurt\Modules\Blog\Models;
 
 use Cviebrock\EloquentSluggable\Sluggable;
-
-use Kurt\Modules\Blog\Observers\CategoryObserver;
-
-use Kurt\Modules\Core\Traits\GetCountFromRelation;
-use Kurt\Modules\Core\Traits\GetUserModelData;
+use Database\Factories\Kurt\Modules\Blog\CategoryFactory;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Spatie\Translatable\HasTranslations;
 
 /**
- * Class Category
- *
- * @package Kurt\Modules\Blog\Models
- * @property integer                                                                        $id
- * @property string                                                                         $name
- * @property string                                                                         $slug
- * @property \Carbon\Carbon                                                                 $created_at
- * @property \Carbon\Carbon                                                                 $updated_at
- * @property \Carbon\Carbon                                                                 $deleted_at
- * @property-read \Illuminate\Database\Eloquent\Collection|\Kurt\Modules\Blog\Models\Post[] $posts
- * @property-read \Kurt\Modules\Blog\Models\Post                                            $postsCount
- * @property-read mixed                                                                     $posts_count
- * @property-read \Kurt\Modules\Blog\Models\Post                                            $latestPost
- * @method static \Illuminate\Database\Query\Builder|\Kurt\Modules\Blog\Models\Category whereSlug($slug)
+ * @property int $id
+ * @property string $slug
+ * @property string $name
+ * @property string|null $description
+ * @property int|null $parent_id
+ * @property int $position
  */
 class Category extends Model
 {
-    use GetCountFromRelation;
-    use GetUserModelData;
+    /** @use HasFactory<CategoryFactory> */
+    use HasFactory;
+
+    use HasTranslations;
     use Sluggable;
+    use SoftDeletes;
 
-    /**
-     * Return the sluggable configuration array for this model.
-     *
-     * @return array
-     */
-    public function sluggable()
-    {
-        return [
-            'slug' => [
-                'source' => 'name',
-                'onUpdate' => true,
-            ]
-        ];
-    }
-
-    /**
-     * The database table used by the model.
-     *
-     * @var string
-     */
     protected $table = 'blog_categories';
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array
-     */
-    protected $fillable = [
-        'name',
-        'slug',
-    ];
+    /** @var list<string> */
+    public array $translatable = ['name', 'description'];
+
+    /** @var list<string> */
+    protected $fillable = ['slug', 'name', 'description', 'parent_id', 'position'];
 
     /**
-     * The attributes that should be mutated to dates.
-     *
-     * @var array
+     * @return array<string, array<string, mixed>>
      */
-    protected $dates = [
-        'deleted_at',
-    ];
-
-    /**
-     * The "booting" method of the model.
-     *
-     * @return void
-     */
-    public static function boot()
+    public function sluggable(): array
     {
-        parent::boot();
-
-        self::observe(new CategoryObserver());
+        return ['slug' => ['source' => 'name', 'onUpdate' => true]];
     }
 
     /**
-     * Posts of the category.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany
+     * @return HasMany<Post, $this>
      */
-    public function posts()
+    public function posts(): HasMany
     {
-        return $this->hasMany($this->getModel('post'), 'category_id', 'id');
+        return $this->hasMany(Post::class, 'category_id');
     }
 
     /**
-     * Posts count as hasOne relation.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\HasOne
+     * @return BelongsTo<self, $this>
      */
-    public function postsCount()
+    public function parent(): BelongsTo
     {
-        return $this->hasOne($this->getModel('post'))
-            ->selectRaw('category_id, count(*) as aggregate')
-            ->groupBy('category_id');
+        return $this->belongsTo(self::class, 'parent_id');
     }
 
     /**
-     * Posts count of the category.
-     *
-     * @param $value
-     *
-     * @return int
+     * @return HasMany<self, $this>
      */
-    public function getPostsCountAttribute($value)
+    public function children(): HasMany
     {
-        return $this->getCountFromRelation('postsCount', $value);
+        return $this->hasMany(self::class, 'parent_id');
     }
 
     /**
-     * Latest post of the category.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\HasOne
+     * @param  Builder<self>  $q
+     * @return Builder<self>
      */
-    public function latestPost()
+    public function scopePopular(Builder $q, bool $desc = true): Builder
     {
-        return $this->hasOne($this->getModel('post'), 'category_id', 'id')->latest()->limit(1);
+        return $q->withCount('posts')->orderBy('posts_count', $desc ? 'desc' : 'asc');
     }
 
-    public function scopePopular($query, $descending = true)
+    protected static function newFactory(): CategoryFactory
     {
-        $query->selectRaw('blog_categories.*, count(`blog_posts`.`id`) as postsCount')
-            ->leftJoin('blog_posts', 'blog_posts.category_id', '=', 'blog_categories.id')
-            ->groupBy('blog_categories.id')
-            ->orderBy('postsCount', $descending ? 'desc' : 'asc');
+        return CategoryFactory::new();
     }
 }
