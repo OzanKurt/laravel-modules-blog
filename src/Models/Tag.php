@@ -12,19 +12,28 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Spatie\Translatable\HasTranslations;
 
+/**
+ * @property int $id
+ * @property string $slug
+ * @property string $name
+ * @property string|null $description
+ * @property string|null $color
+ */
 class Tag extends Model
 {
+    /** @use HasFactory<TagFactory> */
     use HasFactory;
+
     use HasTranslations;
     use Sluggable;
     use SoftDeletes;
 
     protected $table = 'blog_tags';
 
-    /** @var array<int, string> */
+    /** @var list<string> */
     public array $translatable = ['name', 'description'];
 
-    /** @var array<int, string> */
+    /** @var list<string> */
     protected $fillable = ['slug', 'name', 'description', 'color'];
 
     /**

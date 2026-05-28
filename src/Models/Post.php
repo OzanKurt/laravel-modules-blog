@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 use Kurt\Modules\Blog\Enums\CommentApproval;
 use Kurt\Modules\Blog\Enums\PostStatus;
 use Kurt\Modules\Blog\Enums\PostType;
@@ -25,9 +26,30 @@ use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Spatie\Translatable\HasTranslations;
 
+/**
+ * @property int $id
+ * @property string $slug
+ * @property string $title
+ * @property string|null $excerpt
+ * @property string|null $body
+ * @property PostStatus $status
+ * @property PostType $type
+ * @property string|null $video_url
+ * @property int $user_id
+ * @property int|null $category_id
+ * @property int $view_count
+ * @property string|null $last_viewer_ip
+ * @property Carbon|null $published_at
+ * @property Carbon|null $scheduled_for
+ * @property string|null $meta_title
+ * @property string|null $meta_description
+ * @property string|null $meta_og_image
+ */
 class Post extends Model implements HasMedia
 {
+    /** @use HasFactory<PostFactory> */
     use HasFactory;
+
     use HasTranslations;
     use InteractsWithMedia;
     use ResolvesUser;
@@ -36,10 +58,10 @@ class Post extends Model implements HasMedia
 
     protected $table = 'blog_posts';
 
-    /** @var array<int, string> */
+    /** @var list<string> */
     public array $translatable = ['title', 'excerpt', 'body', 'meta_title', 'meta_description'];
 
-    /** @var array<int, string> */
+    /** @var list<string> */
     protected $fillable = [
         'slug', 'title', 'excerpt', 'body', 'status', 'type', 'video_url',
         'user_id', 'category_id', 'view_count', 'last_viewer_ip',
@@ -72,11 +94,17 @@ class Post extends Model implements HasMedia
         return $this->belongsTo(Category::class);
     }
 
+    /**
+     * @return BelongsTo<Model, $this>
+     */
     public function user(): BelongsTo
     {
         return $this->userBelongsTo();
     }
 
+    /**
+     * @return BelongsTo<Model, $this>
+     */
     public function author(): BelongsTo
     {
         return $this->user();
@@ -115,8 +143,15 @@ class Post extends Model implements HasMedia
 
     public function registerMediaConversions(?Media $media = null): void
     {
-        $this->addMediaConversion('thumb')->width(320)->height(320)->nonQueued();
-        $this->addMediaConversion('cover')->width(1200)->height(630)->nonQueued();
+        $thumb = $this->addMediaConversion('thumb');
+        $thumb->width(320);
+        $thumb->height(320);
+        $thumb->nonQueued();
+
+        $cover = $this->addMediaConversion('cover');
+        $cover->width(1200);
+        $cover->height(630);
+        $cover->nonQueued();
     }
 
     /**

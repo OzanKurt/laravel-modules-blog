@@ -11,20 +11,35 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 use Kurt\Modules\Blog\Enums\CommentApproval;
 use Kurt\Modules\Blog\Events\CommentApproved;
 use Kurt\Modules\Blog\Events\CommentRejected;
 use Kurt\Modules\Core\Concerns\ResolvesUser;
 
+/**
+ * @property int $id
+ * @property int $post_id
+ * @property int $user_id
+ * @property int|null $parent_id
+ * @property string $body
+ * @property CommentApproval|null $approval
+ * @property Carbon|null $approved_at
+ * @property Carbon|null $rejected_at
+ * @property int|null $approved_by
+ * @property int|null $rejected_by
+ */
 class Comment extends Model
 {
+    /** @use HasFactory<CommentFactory> */
     use HasFactory;
+
     use ResolvesUser;
     use SoftDeletes;
 
     protected $table = 'blog_comments';
 
-    /** @var array<int, string> */
+    /** @var list<string> */
     protected $fillable = [
         'post_id', 'user_id', 'parent_id', 'body', 'approval',
         'approved_at', 'rejected_at', 'approved_by', 'rejected_by',
@@ -45,11 +60,17 @@ class Comment extends Model
         return $this->belongsTo(Post::class);
     }
 
+    /**
+     * @return BelongsTo<Model, $this>
+     */
     public function user(): BelongsTo
     {
         return $this->userBelongsTo();
     }
 
+    /**
+     * @return BelongsTo<Model, $this>
+     */
     public function author(): BelongsTo
     {
         return $this->user();
@@ -102,7 +123,9 @@ class Comment extends Model
             'approved_by' => $approver->getKey(),
         ])->save();
 
-        CommentApproved::dispatch($this->fresh(), $approver);
+        $this->refresh();
+
+        CommentApproved::dispatch($this, $approver);
 
         return $this;
     }
@@ -115,7 +138,9 @@ class Comment extends Model
             'rejected_by' => $rejector->getKey(),
         ])->save();
 
-        CommentRejected::dispatch($this->fresh(), $rejector);
+        $this->refresh();
+
+        CommentRejected::dispatch($this, $rejector);
 
         return $this;
     }

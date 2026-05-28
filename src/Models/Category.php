@@ -14,19 +14,29 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Spatie\Translatable\HasTranslations;
 
+/**
+ * @property int $id
+ * @property string $slug
+ * @property string $name
+ * @property string|null $description
+ * @property int|null $parent_id
+ * @property int $position
+ */
 class Category extends Model
 {
+    /** @use HasFactory<CategoryFactory> */
     use HasFactory;
+
     use HasTranslations;
     use Sluggable;
     use SoftDeletes;
 
     protected $table = 'blog_categories';
 
-    /** @var array<int, string> */
+    /** @var list<string> */
     public array $translatable = ['name', 'description'];
 
-    /** @var array<int, string> */
+    /** @var list<string> */
     protected $fillable = ['slug', 'name', 'description', 'parent_id', 'position'];
 
     /**
