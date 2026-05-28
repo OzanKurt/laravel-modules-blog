@@ -44,7 +44,7 @@ final class VideoUrl
         if (isset($parts['path'])) {
             $segments = array_values(array_filter(explode('/', trim($parts['path'], '/'))));
             if ($segments !== []) {
-                return end($segments) ?: null;
+                return end($segments);
             }
         }
 

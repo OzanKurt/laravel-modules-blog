@@ -6,6 +6,7 @@ parameters:
     paths:
         - src
     tmpDir: build/phpstan
+    reportUnmatchedIgnoredErrors: false
     ignoreErrors:
         # Traits in this package are consumed by downstream KurtModules packages,
         # so PHPStan's "trait used zero times" check would otherwise flag them.
