@@ -26,7 +26,12 @@
     "rector/rector": "^2.0"
   },
   "autoload": { "psr-4": { "Kurt\\Modules\\Blog\\": "src/" } },
-  "autoload-dev": { "psr-4": { "Kurt\\Modules\\Blog\\Tests\\": "tests/" } },
+  "autoload-dev": {
+    "psr-4": {
+      "Kurt\\Modules\\Blog\\Tests\\": "tests/",
+      "Database\\Factories\\Kurt\\Modules\\Blog\\": "database/factories/"
+    }
+  },
   "extra": {
     "laravel": { "providers": ["Kurt\\Modules\\Blog\\Providers\\BlogServiceProvider"] }
   },
