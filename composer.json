@@ -1,0 +1,51 @@
+{
+  "name": "ozankurt/laravel-modules-blog",
+  "description": "Headless blog module for Laravel with scheduled publishing, SEO, translations, and Filament admin.",
+  "keywords": ["laravel", "filament", "kurtmodules", "blog"],
+  "license": "MIT",
+  "authors": [{ "name": "Ozan Kurt", "email": "ozankurt2@gmail.com" }],
+  "require": {
+    "php": "^8.4",
+    "illuminate/contracts": "^12.0 || ^13.0",
+    "illuminate/database": "^12.0 || ^13.0",
+    "illuminate/support": "^12.0 || ^13.0",
+    "cviebrock/eloquent-sluggable": "^11.0 || ^12.0",
+    "ozankurt/laravel-modules-core": "^2.0",
+    "spatie/laravel-medialibrary": "^11.0",
+    "spatie/laravel-package-tools": "^1.92",
+    "spatie/laravel-translatable": "^6.11"
+  },
+  "require-dev": {
+    "filament/filament": "^3.0 || ^4.0 || ^5.0",
+    "larastan/larastan": "^3.0",
+    "laravel/pint": "^1.18",
+    "league/commonmark": "^2.5",
+    "orchestra/testbench": "^10.0",
+    "pestphp/pest": "^3.0",
+    "pestphp/pest-plugin-laravel": "^3.0",
+    "rector/rector": "^2.0"
+  },
+  "autoload": { "psr-4": { "Kurt\\Modules\\Blog\\": "src/" } },
+  "autoload-dev": { "psr-4": { "Kurt\\Modules\\Blog\\Tests\\": "tests/" } },
+  "extra": {
+    "laravel": { "providers": ["Kurt\\Modules\\Blog\\Providers\\BlogServiceProvider"] }
+  },
+  "repositories": [
+    { "type": "vcs", "url": "https://github.com/OzanKurt/KurtModules-Core" }
+  ],
+  "config": {
+    "sort-packages": true,
+    "allow-plugins": {
+      "pestphp/pest-plugin": true
+    }
+  },
+  "scripts": {
+    "test": "vendor/bin/pest",
+    "test:coverage": "vendor/bin/pest --coverage --min=50",
+    "lint": "vendor/bin/pint --test",
+    "format": "vendor/bin/pint",
+    "stan": "vendor/bin/phpstan analyse --memory-limit=2G"
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true
+}
