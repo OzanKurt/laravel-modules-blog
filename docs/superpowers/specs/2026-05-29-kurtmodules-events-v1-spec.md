@@ -225,6 +225,56 @@ events_session_check_ins              -- check-in once per (session × ticket)
   created_at, updated_at
   unique(session_id, ticket_id)
 
+events_price_tiers                     -- time-based pricing within a single ticket type
+  id, ticket_type_id (FK events_ticket_types, cascadeOnDelete),
+  name (string),                                              -- 'Early bird', 'Regular', 'Last minute'
+  starts_at, ends_at (timestamps nullable),                   -- both null = always active; first matching tier wins
+  price_minor (unsignedBigInteger),
+  capacity (unsignedInteger nullable),                        -- per-tier sub-quota; nullable inherits type
+  sold_count (unsignedBigInteger default 0),
+  position (unsignedInteger default 0),                       -- tie-break ordering when windows overlap
+  created_at, updated_at
+  index(ticket_type_id, starts_at, ends_at)
+
+events_ticket_add_ons                  -- catalog of optional extras per event (parking, dinner, merch)
+  id, event_id (FK events_events, cascadeOnDelete),
+  slug, name (json — translatable), description (json — translatable, nullable),
+  price_minor (unsignedBigInteger), currency (char(3)),
+  capacity (unsignedInteger nullable),                        -- nullable = unlimited
+  sold_count (unsignedBigInteger default 0),
+  scannable (boolean default false),                          -- if true, has its own QR token for door scanning
+  position (unsignedInteger default 0),
+  active (boolean default true),
+  created_at, updated_at, deleted_at
+  unique(event_id, slug)
+
+events_ticket_add_on_purchases         -- attaches an add-on to a ticket (one row per add-on per ticket)
+  id, ticket_id (FK events_tickets, cascadeOnDelete),
+  add_on_id (FK events_ticket_add_ons, restrictOnDelete),
+  order_item_id (FK events_order_items, cascadeOnDelete),     -- billing link
+  quantity (unsignedInteger default 1),
+  unit_price_minor (unsignedBigInteger),
+  line_total_minor (unsignedBigInteger),
+  status (string — enum: pending|paid|cancelled|refunded),
+  qr_token (string nullable, unique),                         -- only when scannable=true
+  checked_in_at (timestamp nullable),
+  checked_in_by (FK users nullable, nullOnDelete),
+  created_at, updated_at, deleted_at
+  index(ticket_id, status)
+
+events_referral_links                  -- organizer-created links for attribution + commission tracking
+  id, event_id (FK events_events nullable, nullOnDelete),     -- null = applies to any event of the organizer
+  organizer_id (FK users, cascadeOnDelete),                   -- who earns the attribution
+  code (string unique),
+  landing_path (string nullable),                             -- relative URL the link redirects to
+  commission_basis_points (unsignedInteger default 0),        -- e.g. 500 = 5.00% of order total
+  max_uses (unsignedInteger nullable),
+  uses_count (unsignedBigInteger default 0),
+  expires_at (timestamp nullable),
+  active (boolean default true),
+  created_at, updated_at, deleted_at
+  index(organizer_id, active)
+
 events_discount_codes
   id, code (string unique),
   description (string nullable),
