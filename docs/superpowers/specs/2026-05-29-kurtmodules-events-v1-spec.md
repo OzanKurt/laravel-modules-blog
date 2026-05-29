@@ -97,10 +97,8 @@ events_events
   status (string — enum), visibility (string — enum),
   starts_at (timestamp), ends_at (timestamp),
   timezone (string default 'UTC'),
-  location_kind (string — enum: physical|online|hybrid),
   location_name (string nullable), location_address (text nullable),
   latitude (decimal(10,7) nullable), longitude (decimal(10,7) nullable),  -- for nearLocation() scope
-  online_url (string nullable),
   cover_path (string nullable),  -- denormalised from medialibrary
   reminder_intervals (json nullable),  -- nullable = use events.reminders.before_hours global default
   attendee_list_visibility (string — enum: private|organizer_only|attendees_only|public, default 'organizer_only'),
@@ -127,8 +125,10 @@ events_events
 events_event_tag                     -- pivot
   event_id, tag_id, primary(event_id, tag_id)
 
-events_event_organizers              -- pivot with role
-  id, event_id, user_id, role (string — enum), created_at, updated_at
+events_event_organizers              -- pivot with role + revenue split
+  id, event_id, user_id, role (string — enum),
+  commission_basis_points (unsignedInteger nullable),         -- nullable = no share; 10000 = 100%; sum across organizers should equal 10000 when revenue is split
+  created_at, updated_at
   unique(event_id, user_id)
 ```
 
@@ -261,6 +261,49 @@ events_ticket_add_on_purchases         -- attaches an add-on to a ticket (one ro
   checked_in_by (FK users nullable, nullOnDelete),
   created_at, updated_at, deleted_at
   index(ticket_id, status)
+
+events_sponsor_tiers                   -- sponsor levels per event (Gold/Silver/Bronze)
+  id, event_id (FK events_events, cascadeOnDelete),
+  slug, name (string),                                        -- displayed label
+  price_minor (unsignedBigInteger), currency (char(3)),
+  comp_ticket_quota (unsignedInteger default 0),              -- complimentary tickets auto-issued per sponsor at this tier
+  comp_ticket_type_id (nullable, FK events_ticket_types, nullOnDelete),  -- which type to issue (null = sponsor picks)
+  benefits (json nullable),                                   -- structured perks list rendered in admin
+  position (unsignedInteger default 0),
+  created_at, updated_at, deleted_at
+  unique(event_id, slug)
+
+events_sponsors                        -- a sponsor's purchase of a tier for an event
+  id, event_id (FK events_events, cascadeOnDelete),
+  sponsor_tier_id (FK events_sponsor_tiers, restrictOnDelete),
+  name (string),                                              -- company name displayed
+  contact_user_id (FK users nullable, nullOnDelete),          -- primary contact who manages comp tickets
+  logo_path (string nullable),                                -- via medialibrary
+  website_url (string nullable),
+  blurb (text nullable),
+  status (string — enum: pending|active|cancelled),
+  order_id (FK events_orders nullable, nullOnDelete),         -- B2B billing order for the sponsorship itself
+  position (unsignedInteger default 0),
+  created_at, updated_at, deleted_at
+  index(event_id, status)
+
+events_sponsor_comp_tickets            -- audit of which tickets were issued from sponsorship quotas
+  id, sponsor_id (FK events_sponsors, cascadeOnDelete),
+  ticket_id (FK events_tickets, cascadeOnDelete),
+  issued_at (timestamp),
+  created_at, updated_at
+  unique(sponsor_id, ticket_id)
+
+events_payout_ledger                   -- per-organizer share of paid orders
+  id, order_id (FK events_orders, cascadeOnDelete),
+  organizer_user_id (FK users, restrictOnDelete),
+  share_basis_points (unsignedInteger),                       -- snapshot of commission at the time
+  amount_minor (unsignedBigInteger), currency (char(3)),
+  status (string — enum: accrued|paid_out|reversed),
+  paid_out_at (timestamp nullable),
+  payout_reference (string nullable),                         -- consumer-supplied reference when status flips to paid_out
+  created_at, updated_at
+  index(organizer_user_id, status)
 
 events_referral_links                  -- organizer-created links for attribution + commission tracking
   id, event_id (FK events_events nullable, nullOnDelete),     -- null = applies to any event of the organizer
@@ -477,10 +520,13 @@ namespace Kurt\Modules\Events\Catalog\Enums;
 enum EventStatus: string { case Draft='draft'; case PendingApproval='pending_approval'; case Published='published'; case Cancelled='cancelled'; case Completed='completed'; }
 enum EventVisibility: string { case Public='public'; case Unlisted='unlisted'; case Private='private'; }
 enum AttendeeListVisibility: string { case Private='private'; case OrganizerOnly='organizer_only'; case AttendeesOnly='attendees_only'; case Public='public'; }
-enum LocationKind: string { case Physical='physical'; case Online='online'; case Hybrid='hybrid'; }
+// LocationKind enum dropped — module supports physical events only.
 enum RecurrenceFrequency: string { case None='none'; case Daily='daily'; case Weekly='weekly'; case Monthly='monthly'; case Yearly='yearly'; }
 enum OrganizerRole: string { case Owner='owner'; case Manager='manager'; case Scanner='scanner'; }
 // Sessions reuse AttendeeStatus for check-in tracking; no dedicated enum needed.
+
+enum SponsorStatus: string { case Pending='pending'; case Active='active'; case Cancelled='cancelled'; }
+enum PayoutStatus: string { case Accrued='accrued'; case PaidOut='paid_out'; case Reversed='reversed'; }
 
 namespace Kurt\Modules\Events\Ticketing\Enums;
 enum TicketTypeMode: string { case Open='open'; case Application='application'; case Rsvp='rsvp'; }
@@ -841,6 +887,21 @@ final class Events
 
     public function saveAsTemplate(Event $source, Model $owner, string $name, ?string $slug = null, bool $public = false): EventTemplate;
     public function createEventFromTemplate(EventTemplate $template, Model $organizer, array $overrides = []): Event;
+
+    // Sponsors
+    public function addSponsorTier(Event $event, array $data): SponsorTier;
+    public function purchaseSponsorship(Event $event, SponsorTier $tier, Model $contactUser, array $data): Sponsor;
+    public function issueCompTicket(Sponsor $sponsor, Model $holder, array $assignmentData): Ticket;
+
+    // GDPR
+    /** @return array<string, mixed> Structured personal-data dump suitable for JSON/CSV export. */
+    public function exportPersonalData(Model $user): array;
+    /** Replaces PII on the user's rows with hashed/null values; preserves aggregates + audit log shape. */
+    public function anonymizePersonalData(Model $user): void;
+
+    // Payouts (lightweight ledger)
+    public function recordPayout(int $ledgerEntryId, string $reference): void;       // flips status to paid_out
+    public function reversePayout(int $ledgerEntryId, string $reason): void;          // flips status to reversed
 }
 ```
 
@@ -1031,6 +1092,15 @@ return [
         'provider' => null,                       // FQCN implementing EventChatBridge; null = no bridge
     ],
 
+    'gdpr' => [
+        'retention_days' => null,                 // null = no automatic retention; e.g. 730 = anonymize records older than 2 years
+        'anonymize_audit_log_actor' => true,      // when anonymizing a user, also null their actor_id on existing audit_log rows
+    ],
+
+    'payouts' => [
+        'auto_accrue_on_order_paid' => true,      // when true, events_payout_ledger rows are written automatically per organizer share
+    ],
+
     'documents' => [
         'disk' => env('EVENTS_DOCUMENT_DISK', 'private'),
         'verifier' => null,                // FQCN implementing DocumentVerifier; null = manual review
@@ -1094,7 +1164,8 @@ return [
 - `events:dispatch-reminders` — every 5 minutes. Sends reminders for events crossing each `before_hours` threshold (per-event override read from `events.reminder_intervals`).
 - `events:expire-pending-orders` — every minute. Cancels orders stuck in `pending` past `events.orders.pending_timeout_minutes` and releases held capacity.
 - `events:dispatch-announcements` — every minute. Sends scheduled announcements whose `scheduled_for` has arrived.
-- `events:demo` — seeds a sample event, ticket types, price tiers, add-ons, referral link, discount code, attendees.
+- `events:enforce-retention` — daily. Anonymizes records older than `events.gdpr.retention_days` for users with no recent activity. Null retention disables.
+- `events:demo` — seeds a sample event, ticket types, price tiers, add-ons, referral link, discount code, sponsor, attendees.
 
 ## 21. Optional Laravel Notifications
 
@@ -1188,6 +1259,36 @@ Implementation plan will reference this spec and structure work into ~15 tasks.
 - [ ] ICS exporter validated against a real calendar (manual verification once).
 - [ ] README + CHANGELOG + LICENSE in place.
 - [ ] Tagged `v1.0.0` after merge to master.
+
+## 25.5 GDPR / data-protection helpers
+
+### Personal-data export
+
+`Events::exportPersonalData(Model $user)` returns a structured `array<string, mixed>` containing every row associated with the user across `events_attendees`, `events_applications`, `events_orders`, `events_order_item_assignments`, `events_tickets`, `events_refunds`, `events_document_uploads`, `events_audit_log`, `events_announcement_recipients`, `events_sale_queue_entries`, `events_waitlist_entries`. The consumer serialises to JSON or CSV as needed for the data-subject access request response.
+
+### Anonymisation
+
+`Events::anonymizePersonalData(Model $user)` walks the same set of tables and:
+
+- replaces `holder_name`, `holder_email`, `decision_note`, `note`, `failure_reason` and similar PII text columns with a hash of the original value (or `null` when nullable);
+- replaces `profile`, `metadata`, `answers`, `holder_metadata`, `decision_metadata` JSON columns with `{anonymized_at: ISO8601}`;
+- when `events.gdpr.anonymize_audit_log_actor=true`, sets `events_audit_log.actor_id = null` for past rows acted on by this user, preserving the action keys for system trail;
+- aggregates (counts, sold_count, etc.) are preserved;
+- does NOT delete refund rows (financial records typically have a separate legal retention window managed by the consumer's accounting system).
+
+### Retention command
+
+`events:enforce-retention` runs daily when scheduled. For each user with `last activity > events.gdpr.retention_days` (no order/application/ticket touched), it calls `anonymizePersonalData` automatically. The window is configurable; null disables the command.
+
+### DPIA + data-flow documentation
+
+The repo ships `docs/gdpr/` with:
+
+- `data-flow.md` — diagram of personal data flow through the module's tables.
+- `processing-record.md` — Article 30 record-of-processing template that consumers can adapt.
+- `dsr-checklist.md` — operational checklist for handling data-subject requests.
+
+These are documentation only and ship as part of the package's distribution (not export-ignored).
 
 ## 26. Open follow-ups (not in v1.0)
 
