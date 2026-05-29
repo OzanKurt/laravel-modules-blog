@@ -99,8 +99,10 @@ events_events
   timezone (string default 'UTC'),
   location_kind (string — enum: physical|online|hybrid),
   location_name (string nullable), location_address (text nullable),
+  latitude (decimal(10,7) nullable), longitude (decimal(10,7) nullable),  -- for nearLocation() scope
   online_url (string nullable),
   cover_path (string nullable),  -- denormalised from medialibrary
+  reminder_intervals (json nullable),  -- nullable = use events.reminders.before_hours global default
 
   -- Recurrence (single events leave both null)
   parent_event_id (nullable, self FK, cascadeOnDelete),  -- for occurrences of a recurring series
@@ -523,7 +525,7 @@ final readonly class PriceBreakdown
 - `order` — single flat deduction off the order subtotal.
 - `per_ticket` — deducted from each ticket line (multiplied by item quantity).
 
-Flat-amount codes are rejected when their currency doesn't match the order's currency. (Cross-currency conversion is consumer territory — see §25 follow-ups.)
+Flat-amount codes are rejected when their currency doesn't match the order's currency. (Cross-currency conversion is consumer territory — see §26 follow-ups.)
 
 ### 10.2 Limits enforcement
 
@@ -653,6 +655,8 @@ final class Events
     public function pay(Order $order, string $processor, string $reference): void;
     public function transferTicket(Ticket $ticket, Model $newHolder): Ticket;
     public function checkIn(Ticket $ticket, Model $scanner): Attendee;
+    public function checkInByToken(string $qrToken, Model $scanner): Attendee;
+    public function checkInSession(Ticket $ticket, Session $session, Model $scanner): SessionCheckIn;
 
     public function apply(TicketType $type, Model $applicant, array $formAnswers = []): Application;
     public function approve(Application $application, Model $approver): Ticket;
@@ -671,7 +675,57 @@ final class Events
 
 Bound as singleton in the container. A `Kurt\Modules\Events\Facades\Events` facade is a thin wrapper for static call ergonomics (optional).
 
-## 16. Author/attendee traits
+## 16. Behaviour details
+
+### 16.1 Capacity holds & cart abandonment
+
+Capacity is held the moment `Events::reserve(...)` runs: the module increments `ticket_types.sold_count` and `events.tickets_sold_count` immediately, before payment lands. This prevents over-selling during peak load. The relationship of `sold_count` is therefore **"reserved + paid"**, not "paid only".
+
+`Events::expirePendingOrders()` (run by the `events:expire-pending-orders` command every minute) finds orders with `status=pending` and `created_at < now() - events.orders.pending_timeout_minutes` and:
+
+1. Sets `Order.status = OrderStatus::Cancelled`.
+2. Decrements `ticket_types.sold_count` and `events.tickets_sold_count` by the order's quantities.
+3. Removes any `events_order_item_assignments` rows (we don't need to keep abandoned holder data).
+4. Dispatches `OrderCancelled` with reason `cart_timeout`.
+
+Manual cancellation by buyer or admin follows the same release path.
+
+### 16.2 QR check-in tokens
+
+`Ticket.qr_token` is a **signed payload** generated when the ticket is issued. Format:
+
+```
+base64url( payload_json ) . "." . hex( hmac_sha256( payload_json, app_key ) )
+```
+
+The payload JSON contains `{ticket_id, event_id, issued_at, nonce}`. The HMAC uses `config('app.key')`. The full string is what gets encoded into the QR image.
+
+`Events::checkInByToken(string $qrToken, Model $scanner)`:
+
+1. Splits at `.` into payload + signature.
+2. Recomputes HMAC; rejects on mismatch.
+3. Decodes payload; loads ticket; verifies `event_id` matches and ticket status is `issued`.
+4. If `events.check_in.token_lifetime_minutes > 0`, rejects when `issued_at` is too old.
+5. If `events.check_in.replay_protection`, logs the attempt with `nonce`; rejects when the nonce was used before (per `events_check_in_attempts` table, see below).
+6. Calls existing `Events::checkIn($ticket, $scanner)` to mark `checked_in_at` and return Attendee.
+
+When replay protection is on, an `events_check_in_attempts` table records `(ticket_id, scanner_user_id, nonce, ip, user_agent, succeeded, failure_reason, occurred_at)`. Re-presented QR tokens for an already-checked-in ticket return the existing Attendee row but log the duplicate attempt for audit.
+
+### 16.3 Search & discovery scopes
+
+`Event::class` exposes the following query scopes for consumers building list endpoints:
+
+- `scopePublished(Builder $q)` — `status = published` and `cancelled_at is null`.
+- `scopeUpcoming(Builder $q)` — `starts_at >= now()`.
+- `scopePast(Builder $q)` — `starts_at < now()`.
+- `scopeInCategory(Builder $q, Category|int $category)`.
+- `scopeWithTags(Builder $q, array|int $tagIds, bool $matchAll = false)`.
+- `scopeNearLocation(Builder $q, float $lat, float $lng, float $radius)` — Haversine SQL via raw expression; requires `latitude`/`longitude` populated and `events.search.geo.enabled = true`. Distance unit comes from `events.search.geo.distance_unit`.
+- `scopeOrganizedBy(Builder $q, Model $user)` — events the user organizes.
+
+Scout adapter ships in v1.1 as a follow-up; v1.0 is scope-only.
+
+## 17. Author/attendee traits
 
 ```
 Kurt\Modules\Events\Contracts\EventOrganizer
@@ -682,7 +736,7 @@ Kurt\Modules\Events\Concerns\IsEventAttendee
 
 Attendee profile fields are app-controlled. The trait exposes `eventTickets()`, `eventOrders()`, `eventApplications()`, `eventAttendances()`, `eventOrganized()`.
 
-## 17. Auth / policies
+## 18. Auth / policies
 
 - `EventPolicy` — view (per visibility), update/delete (organizer with manager+role or staff via `canManageEvents` gate).
 - `TicketTypePolicy` — manage by event organizer.
@@ -691,7 +745,7 @@ Attendee profile fields are app-controlled. The trait exposes `eventTickets()`, 
 - `RefundPolicy` — request by buyer or staff; process by staff.
 - `QueuePolicy`/`WaitlistPolicy` — join by any auth user (subject to event eligibility).
 
-## 18. Config (`config/events.php`)
+## 19. Config (`config/events.php`)
 
 ```php
 return [
@@ -755,7 +809,23 @@ return [
 
     'reminders' => [
         'enabled' => true,
-        'before_hours' => [24, 1],         // dispatch at T-24h and T-1h
+        'before_hours' => [24, 1],         // global default; events.reminder_intervals overrides per event
+    ],
+
+    'orders' => [
+        'pending_timeout_minutes' => 15,   // cart abandonment cutoff; orders past this are auto-cancelled
+    ],
+
+    'check_in' => [
+        'token_lifetime_minutes' => 0,     // 0 = no expiry; QR tokens valid for the event window
+        'replay_protection' => true,       // log every check-in attempt for audit / replay defence
+    ],
+
+    'search' => [
+        'geo' => [
+            'enabled' => false,            // when true, nearLocation() scope assumes latitude/longitude populated on events
+            'distance_unit' => 'km',
+        ],
     ],
 
     'models' => [
@@ -764,16 +834,17 @@ return [
 ];
 ```
 
-## 19. Console commands
+## 20. Console commands
 
 - `events:release-queue` — runs every 10 seconds when scheduler is active. Promotes queued users.
 - `events:prune-queue` — marks abandoned heartbeats.
 - `events:expire-waitlist-claims` — runs every minute. Re-offers expired claims to next.
 - `events:generate-occurrences` — daily. Materialises recurring events into the rolling window.
-- `events:dispatch-reminders` — every 5 minutes. Sends reminders for events crossing each `before_hours` threshold.
+- `events:dispatch-reminders` — every 5 minutes. Sends reminders for events crossing each `before_hours` threshold (per-event override read from `events.reminder_intervals`).
+- `events:expire-pending-orders` — every minute. Cancels orders stuck in `pending` past `events.orders.pending_timeout_minutes` and releases held capacity.
 - `events:demo` — seeds a sample event, ticket types, discount code, attendees.
 
-## 20. Optional Laravel Notifications
+## 21. Optional Laravel Notifications
 
 Shipped under `src/Notifications/` (only registered when `config('events.notifications.enabled')`):
 
@@ -789,7 +860,7 @@ Shipped under `src/Notifications/` (only registered when `config('events.notific
 
 Each uses `via(['mail', 'database'])` by default; consumer can override.
 
-## 21. Filament admin (v1.1)
+## 22. Filament admin (v1.1)
 
 Resources to ship under `src/Filament/V{3,4,5}/Resources/`:
 
@@ -804,7 +875,7 @@ Resources to ship under `src/Filament/V{3,4,5}/Resources/`:
 
 V1.0 ships **headless**. V1.1 adds the resources.
 
-## 22. Testing matrix
+## 23. Testing matrix
 
 ### Unit
 - All enums.
@@ -832,7 +903,7 @@ V1.0 ships **headless**. V1.1 adds the resources.
 
 Coverage target: **70% lines** (lower than Blog/Library/Forum/Chat at 80% because Events is bigger and lifecycle-heavy — many code paths are integration-level).
 
-## 23. Repository setup
+## 24. Repository setup
 
 The repo `KurtModules-Events` does not yet exist on GitHub. Steps before implementation:
 
@@ -845,7 +916,7 @@ The repo `KurtModules-Events` does not yet exist on GitHub. Steps before impleme
 
 Implementation plan will reference this spec and structure work into ~15 tasks.
 
-## 24. Definition of done (v1.0)
+## 25. Definition of done (v1.0)
 
 - [ ] Pint + PHPStan level 8 + Pest (≥ 70% line coverage) all green.
 - [ ] CI matrix green on Laravel 12.
@@ -858,7 +929,7 @@ Implementation plan will reference this spec and structure work into ~15 tasks.
 - [ ] README + CHANGELOG + LICENSE in place.
 - [ ] Tagged `v1.0.0` after merge to master.
 
-## 25. Open follow-ups (not in v1.0)
+## 26. Open follow-ups (not in v1.0)
 
 - Filament resources (v1.1).
 - Group/role-based ticket pricing (e.g., student discount tied to verified document).
