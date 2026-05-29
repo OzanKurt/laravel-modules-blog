@@ -430,6 +430,31 @@ events_waitlist_entries                -- after ticket_type sells out
   unique(ticket_type_id, user_id)
   index(ticket_type_id, status, created_at)
 
+events_event_templates                 -- reusable starting points for new events
+  id, owner_id (FK users, cascadeOnDelete),
+  slug, name (string), description (text nullable),
+  payload (json),                                            -- snapshot of event + ticket types + sessions + requirements + add-ons + price tiers
+  is_public (boolean default false),                         -- when true, other organizers can use it
+  used_count (unsignedBigInteger default 0),
+  created_at, updated_at, deleted_at
+  unique(owner_id, slug)
+  index(is_public)
+
+events_audit_log                       -- our own audit log (independent of spatie/activitylog)
+  id, event_id (FK events_events nullable, nullOnDelete),    -- nullable for org-wide events (e.g., template usage)
+  actor_id (FK users nullable, nullOnDelete),                -- null for system actions
+  actor_type (string nullable),                              -- 'system', 'organizer', 'attendee', 'platform_admin'
+  action (string),                                           -- domain action key: 'event.published', 'ticket.transferred', 'refund.processed', …
+  subject_type (string nullable),                            -- FQCN of subject model
+  subject_id (unsignedBigInteger nullable),
+  changes (json nullable),                                   -- {before: {...}, after: {...}} attribute diff
+  context (json nullable),                                   -- request metadata: ip, user_agent, route
+  occurred_at (timestamp, indexed),
+  created_at, updated_at
+  index(event_id, occurred_at)
+  index(action)
+  index(subject_type, subject_id)
+
 events_refunds
   id, order_id (FK events_orders, cascadeOnDelete),
   ticket_id (nullable, FK events_tickets, nullOnDelete),     -- present for partial per-ticket refunds
@@ -704,6 +729,40 @@ Module behaviour:
 
 Consumer apps operating outside the EU set the config to `0` to disable; consumer apps inside the EU keep the default. The module itself doesn't infer jurisdiction.
 
+## 13a. Pluggable contracts
+
+Module defines a small set of optional contracts. Each is bound by FQCN in `config/events.php`; module instantiates via the container when present.
+
+```php
+namespace Kurt\Modules\Events\Eligibility\Contracts;
+interface DocumentVerifier { /* §16.x */ }
+interface RequirementEvaluator { /* §7.1 */ }
+interface GroupResolver
+{
+    /** @return array<int, string> Group identifiers the user belongs to. */
+    public function groupsFor(\Illuminate\Database\Eloquent\Model $user): array;
+}
+
+namespace Kurt\Modules\Events\Flow\Contracts;
+interface QueueChallengeProvider
+{
+    /** Throws QueueChallengeFailed when the supplied token is invalid. */
+    public function verify(\Illuminate\Database\Eloquent\Model $user, string $challengeToken, array $context = []): void;
+}
+
+namespace Kurt\Modules\Events\Catalog\Contracts;
+interface EventChatBridge
+{
+    /** Returns an opaque room identifier the consumer's chat tool can resolve, or null. */
+    public function roomIdFor(Event $event): ?string;
+
+    /** Called by Events::publish() once a room exists; consumer may store the id on Event::data. */
+    public function ensureRoomFor(Event $event): ?string;
+}
+```
+
+The chat bridge is the canonical way to integrate any chat backend (including KurtModules-Chat) without creating a cross-module hard dependency. Spec §3 of the umbrella forbids those, so this stays a contract.
+
 ## 14. Domain events
 
 Selection of dispatched events (all under `Kurt\Modules\Events\Events\`):
@@ -711,6 +770,8 @@ Selection of dispatched events (all under `Kurt\Modules\Events\Events\`):
 - Catalog: `EventCreated`, `EventUpdated`, `EventPublished`, `EventCancelled`, `EventCompleted`, `EventApprovedForPublication`, `OccurrenceGenerated`, `SessionCreated`, `SessionUpdated`, `SessionDeleted`.
 - Ticketing: `TicketTypeCreated`, `TicketTypeReleased`, `PriceTierCreated`, `PriceTierActivated`, `OrderCreated`, `OrderPaid`, `OrderCancelled`, `OrderRefunded`, `OrderPartiallyRefunded`, `TicketIssued`, `TicketTransferRequested`, `TicketTransferred`, `TicketCheckedIn`, `SessionCheckedIn`, `DiscountCodeApplied`, `AddOnPurchased`, `AddOnRefunded`, `AddOnCheckedIn`, `ReferralAttributionRecorded`.
 - Attendance: `ApplicationSubmitted`, `ApplicationApproved`, `ApplicationRejected`, `AttendeeRegistered`, `AttendeeCancelled`, `AttendanceFormResponseStored`, `AnnouncementScheduled`, `AnnouncementSent`.
+- Catalog (continued): `EventClonedFrom`, `EventTemplateSaved`, `EventCreatedFromTemplate`.
+- Audit: `AuditLogEntryRecorded` (low-level, dispatched by the audit writer itself; useful for opt-in shipping to external SIEMs).
 - Eligibility: `DocumentUploaded`, `DocumentVerified`, `DocumentRejected`, `RequirementCheckPassed`, `RequirementCheckFailed`.
 - Flow: `QueueJoined`, `QueueReleased` (broadcast), `QueueExpired`, `WaitlistJoined`, `WaitlistPromoted` (broadcast), `WaitlistExpired`, `RefundRequested`, `RefundProcessed`, `RefundFailed`.
 
@@ -772,6 +833,14 @@ final class Events
     ): Announcement;
 
     public function attributeReferral(Order $order, string $code): void;  // called by consumer at checkout when referral cookie present
+
+    /**
+     * @param array<string, mixed> $overrides Field overrides applied to the cloned event (title, slug, starts_at, etc.).
+     */
+    public function cloneEvent(Event $source, array $overrides = []): Event;
+
+    public function saveAsTemplate(Event $source, Model $owner, string $name, ?string $slug = null, bool $public = false): EventTemplate;
+    public function createEventFromTemplate(EventTemplate $template, Model $organizer, array $overrides = []): Event;
 }
 ```
 
@@ -858,7 +927,25 @@ When the config flag is `false` (default), the flow stays exactly as before — 
 
 The `canManageEventApprovals` gate guards `approveForPublication`. Consumers register their staff/admin roles against that gate.
 
-### 16.7 Search & discovery scopes
+### 16.7 Audit log
+
+Every state-changing facade method writes one or more rows to `events_audit_log`. The module does not depend on `spatie/laravel-activitylog`; this log is internal and queryable directly.
+
+Action keys follow the `{aggregate}.{verb}` pattern: `event.created`, `event.published`, `event.cancelled`, `ticket.issued`, `ticket.transferred`, `order.paid`, `order.refunded`, `refund.processed`, `application.approved`, `requirement.checked`, `announcement.sent`, `referral.attributed`, etc.
+
+`changes` carries a `{before, after}` JSON diff for update actions. `context` is populated by a request-scoped middleware-like callback the consumer registers in the service provider; default captures `ip` and `user_agent` from the active request when available.
+
+`Events::auditLogFor(Event|Order|Ticket|Refund $subject, ?int $limit = 100)` returns the audit trail for any first-class subject, sorted descending by `occurred_at`.
+
+### 16.8 Event templates & cloning
+
+Two related helpers:
+
+- **`Events::cloneEvent($source, $overrides)`** — copies the event + its ticket types, sessions, attendance forms, requirements, add-ons, price tiers (but never sales data: orders, tickets, applications, attendees, refunds). Returns a new event in `Draft` (or `PendingApproval` when configured). Overrides are field-level (e.g., `['title' => 'Concert 2027', 'starts_at' => …]`). Useful for ad-hoc duplication of a one-off event.
+
+- **`EventTemplate` model + `saveAsTemplate()` / `createEventFromTemplate()`** — explicit reusable templates. Saving captures the same payload as cloneEvent into `events_event_templates.payload`. Templates can be private to the owner or `is_public=true` so other organizers can spawn events from them. Each spawn increments `used_count`.
+
+### 16.9 Search & discovery scopes
 
 `Event::class` exposes the following query scopes for consumers building list endpoints:
 
@@ -929,6 +1016,19 @@ return [
 
     'publishing' => [
         'require_approval' => false,              // when true, new events start in EventStatus::PendingApproval and need admin approval
+    ],
+
+    'audit' => [
+        'enabled' => true,
+        'capture_context' => true,                // when true, populate audit_log.context.ip + .user_agent from the active request
+    ],
+
+    'anti_bot' => [
+        'queue_challenge' => null,                // FQCN implementing QueueChallengeProvider; null = no challenge
+    ],
+
+    'chat_bridge' => [
+        'provider' => null,                       // FQCN implementing EventChatBridge; null = no bridge
     ],
 
     'documents' => [
