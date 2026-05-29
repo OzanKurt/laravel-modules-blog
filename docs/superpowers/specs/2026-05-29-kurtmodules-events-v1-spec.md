@@ -170,6 +170,7 @@ events_orders
   tax_rate_basis_points (unsignedInteger nullable),     -- e.g. 1900 = 19.00% VAT; nullable when tax not applicable
   currency (char(3)),
   discount_code_id (nullable, FK events_discount_codes, nullOnDelete),
+  referral_link_id (nullable, FK events_referral_links, nullOnDelete),  -- attribution
   processor (string nullable),                          -- e.g. 'stripe'
   processor_reference (string nullable),                -- gateway charge id
   paid_at (timestamp nullable),
@@ -183,6 +184,7 @@ events_orders
 events_order_items
   id, order_id (FK, cascadeOnDelete),
   ticket_type_id (FK events_ticket_types, restrictOnDelete),
+  price_tier_id (nullable, FK events_price_tiers, nullOnDelete),  -- which time-based tier applied at purchase
   quantity (unsignedInteger),
   unit_price_minor (unsignedBigInteger),
   line_total_minor (unsignedBigInteger),
@@ -272,6 +274,28 @@ events_applications
   created_at, updated_at
   unique(applicant_id, ticket_type_id)
   index(status, submitted_at)
+
+events_announcements                   -- organizer-broadcasts to attendees (Mail + Database notifications)
+  id, event_id (FK events_events, cascadeOnDelete),
+  author_id (FK users, restrictOnDelete),
+  subject (string), body (text),
+  audience (string — enum: all|registered|checked_in|by_ticket_type|by_session),
+  audience_filter (json nullable),                            -- e.g. {ticket_type_ids: [12, 17]} or {session_ids: [3]}
+  scheduled_for (timestamp nullable),                         -- null = send immediately; future = scheduled
+  sent_at (timestamp nullable),
+  recipient_count (unsignedInteger default 0),
+  created_at, updated_at, deleted_at
+  index(event_id, sent_at)
+
+events_announcement_recipients         -- per-recipient delivery audit
+  id, announcement_id (FK events_announcements, cascadeOnDelete),
+  attendee_id (FK events_attendees, cascadeOnDelete),
+  status (string — enum: pending|sent|failed|opened),
+  notification_id (string nullable),                          -- Laravel notifications.id reference if database channel used
+  sent_at, opened_at (timestamps nullable),
+  failure_reason (string nullable),
+  created_at, updated_at
+  unique(announcement_id, attendee_id)
 
 events_attendees                       -- a person attending; created when ticket issued
   id, event_id, ticket_id (FK events_tickets, cascadeOnDelete),
@@ -389,6 +413,11 @@ enum OrderStatus: string { case Pending='pending'; case Paid='paid'; case Cancel
 enum TicketStatus: string { case Issued='issued'; case Cancelled='cancelled'; case Refunded='refunded'; case CheckedIn='checked_in'; case Transferred='transferred'; }
 enum DiscountKind: string { case Percent='percent'; case FlatAmount='flat_amount'; }
 enum DiscountApplicationScope: string { case Order='order'; case PerTicket='per_ticket'; }
+enum AddOnPurchaseStatus: string { case Pending='pending'; case Paid='paid'; case Cancelled='cancelled'; case Refunded='refunded'; }
+
+namespace Kurt\Modules\Events\Attendance\Enums;
+enum AnnouncementAudience: string { case All='all'; case Registered='registered'; case CheckedIn='checked_in'; case ByTicketType='by_ticket_type'; case BySession='by_session'; }
+enum AnnouncementRecipientStatus: string { case Pending='pending'; case Sent='sent'; case Failed='failed'; case Opened='opened'; }
 enum DiscountScope: string { case Global='global'; case EventsSubset='events_subset'; }
 
 namespace Kurt\Modules\Events\Attendance\Enums;
@@ -629,9 +658,9 @@ Consumer apps operating outside the EU set the config to `0` to disable; consume
 
 Selection of dispatched events (all under `Kurt\Modules\Events\Events\`):
 
-- Catalog: `EventCreated`, `EventUpdated`, `EventPublished`, `EventCancelled`, `EventCompleted`, `OccurrenceGenerated`, `SessionCreated`, `SessionUpdated`, `SessionDeleted`.
-- Ticketing: `TicketTypeCreated`, `TicketTypeReleased`, `OrderCreated`, `OrderPaid`, `OrderCancelled`, `OrderRefunded`, `OrderPartiallyRefunded`, `TicketIssued`, `TicketTransferRequested`, `TicketTransferred`, `TicketCheckedIn`, `SessionCheckedIn`, `DiscountCodeApplied`.
-- Attendance: `ApplicationSubmitted`, `ApplicationApproved`, `ApplicationRejected`, `AttendeeRegistered`, `AttendeeCancelled`, `AttendanceFormResponseStored`.
+- Catalog: `EventCreated`, `EventUpdated`, `EventPublished`, `EventCancelled`, `EventCompleted`, `EventApprovedForPublication`, `OccurrenceGenerated`, `SessionCreated`, `SessionUpdated`, `SessionDeleted`.
+- Ticketing: `TicketTypeCreated`, `TicketTypeReleased`, `PriceTierCreated`, `PriceTierActivated`, `OrderCreated`, `OrderPaid`, `OrderCancelled`, `OrderRefunded`, `OrderPartiallyRefunded`, `TicketIssued`, `TicketTransferRequested`, `TicketTransferred`, `TicketCheckedIn`, `SessionCheckedIn`, `DiscountCodeApplied`, `AddOnPurchased`, `AddOnRefunded`, `AddOnCheckedIn`, `ReferralAttributionRecorded`.
+- Attendance: `ApplicationSubmitted`, `ApplicationApproved`, `ApplicationRejected`, `AttendeeRegistered`, `AttendeeCancelled`, `AttendanceFormResponseStored`, `AnnouncementScheduled`, `AnnouncementSent`.
 - Eligibility: `DocumentUploaded`, `DocumentVerified`, `DocumentRejected`, `RequirementCheckPassed`, `RequirementCheckFailed`.
 - Flow: `QueueJoined`, `QueueReleased` (broadcast), `QueueExpired`, `WaitlistJoined`, `WaitlistPromoted` (broadcast), `WaitlistExpired`, `RefundRequested`, `RefundProcessed`, `RefundFailed`.
 
@@ -680,6 +709,19 @@ final class Events
     public function queueHeartbeat(SaleQueueEntry $entry): void;
     public function joinWaitlist(TicketType $type, Model $user, int $quantity = 1): WaitlistEntry;
     public function claimWaitlist(WaitlistEntry $entry): Order;
+
+    /** @param array<int, array{add_on_id: int, quantity: int}> $addOnSelections */
+    public function purchaseAddOns(Ticket $ticket, array $addOnSelections): Order;
+    public function checkInAddOn(string $qrToken, Model $scanner): TicketAddOnPurchase;
+
+    public function announce(
+        Event $event, Model $author, string $subject, string $body,
+        AnnouncementAudience $audience = AnnouncementAudience::All,
+        array $audienceFilter = [],
+        ?\DateTimeInterface $scheduledFor = null,
+    ): Announcement;
+
+    public function attributeReferral(Order $order, string $code): void;  // called by consumer at checkout when referral cookie present
 }
 ```
 
@@ -901,7 +943,8 @@ return [
 - `events:generate-occurrences` — daily. Materialises recurring events into the rolling window.
 - `events:dispatch-reminders` — every 5 minutes. Sends reminders for events crossing each `before_hours` threshold (per-event override read from `events.reminder_intervals`).
 - `events:expire-pending-orders` — every minute. Cancels orders stuck in `pending` past `events.orders.pending_timeout_minutes` and releases held capacity.
-- `events:demo` — seeds a sample event, ticket types, discount code, attendees.
+- `events:dispatch-announcements` — every minute. Sends scheduled announcements whose `scheduled_for` has arrived.
+- `events:demo` — seeds a sample event, ticket types, price tiers, add-ons, referral link, discount code, attendees.
 
 ## 21. Optional Laravel Notifications
 
