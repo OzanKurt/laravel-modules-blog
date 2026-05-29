@@ -103,6 +103,7 @@ events_events
   online_url (string nullable),
   cover_path (string nullable),  -- denormalised from medialibrary
   reminder_intervals (json nullable),  -- nullable = use events.reminders.before_hours global default
+  attendee_list_visibility (string — enum: private|organizer_only|attendees_only|public, default 'organizer_only'),
 
   -- Recurrence (single events leave both null)
   parent_event_id (nullable, self FK, cascadeOnDelete),  -- for occurrences of a recurring series
@@ -374,8 +375,9 @@ events_refunds
 
 ```php
 namespace Kurt\Modules\Events\Catalog\Enums;
-enum EventStatus: string { case Draft='draft'; case Published='published'; case Cancelled='cancelled'; case Completed='completed'; }
+enum EventStatus: string { case Draft='draft'; case PendingApproval='pending_approval'; case Published='published'; case Cancelled='cancelled'; case Completed='completed'; }
 enum EventVisibility: string { case Public='public'; case Unlisted='unlisted'; case Private='private'; }
+enum AttendeeListVisibility: string { case Private='private'; case OrganizerOnly='organizer_only'; case AttendeesOnly='attendees_only'; case Public='public'; }
 enum LocationKind: string { case Physical='physical'; case Online='online'; case Hybrid='hybrid'; }
 enum RecurrenceFrequency: string { case None='none'; case Daily='daily'; case Weekly='weekly'; case Monthly='monthly'; case Yearly='yearly'; }
 enum OrganizerRole: string { case Owner='owner'; case Manager='manager'; case Scanner='scanner'; }
@@ -647,6 +649,7 @@ use Kurt\Modules\Events\Flow\Models\{SaleQueueEntry, WaitlistEntry, Refund};
 final class Events
 {
     public function createEvent(array $data, Model $organizer): Event;
+    public function approveForPublication(Event $event, Model $platformAdmin): void;  // only when events.publishing.require_approval=true
     public function publish(Event $event): void;
     public function cancel(Event $event, Model $canceller, string $reason): void;
 
@@ -739,7 +742,31 @@ Read-heavy paths (search scopes, listing endpoints) do not lock — they tolerat
 5. If neither allowance applies, throws `SelfCancellationNotPermitted` (typed exception). Buyer can still ask the organizer.
 6. Otherwise creates a `Refund` with `reason=attendee_request`, dispatches `RefundRequested`, and returns the Refund row.
 
-### 16.5 Search & discovery scopes
+### 16.5 Attendee list privacy
+
+`Event::attendee_list_visibility` declares the most permissive level. The effective visibility for any given attendee is the more restrictive of:
+
+- the event's `attendee_list_visibility`, and
+- the attendee's own `profile.list_visibility` (null treated as `public`, valid values are `public` or `private`).
+
+`Event::visibleAttendees(?Model $viewer): Collection`:
+
+- `private` — empty collection regardless of viewer.
+- `organizer_only` — returns attendees only when `$viewer` is an organizer (any role).
+- `attendees_only` — returns attendees only when `$viewer` is also an attendee on the same event.
+- `public` — returns attendees with `profile.list_visibility !== 'private'`.
+
+This protects organizer-level lookups (always full list) from public-facing rendering. Default is `organizer_only` so an unconfigured event never leaks attendee data.
+
+### 16.6 Event approval workflow
+
+When `events.publishing.require_approval` is `true`, `Events::createEvent(...)` writes the event with `status = EventStatus::PendingApproval` rather than `Draft`. The organizer cannot transition the event toward `Published` until `Events::approveForPublication($event, $platformAdmin)` runs; that call dispatches `EventApprovedForPublication` and moves the event to `Draft`. The organizer then proceeds with normal `publish()`.
+
+When the config flag is `false` (default), the flow stays exactly as before — new events land in `Draft` and can be published directly by the organizer.
+
+The `canManageEventApprovals` gate guards `approveForPublication`. Consumers register their staff/admin roles against that gate.
+
+### 16.7 Search & discovery scopes
 
 `Event::class` exposes the following query scopes for consumers building list endpoints:
 
@@ -806,6 +833,10 @@ return [
 
     'tax' => [
         'enabled' => true,                        // when false, tax_minor + tax_rate_basis_points stay null
+    ],
+
+    'publishing' => [
+        'require_approval' => false,              // when true, new events start in EventStatus::PendingApproval and need admin approval
     ],
 
     'documents' => [
