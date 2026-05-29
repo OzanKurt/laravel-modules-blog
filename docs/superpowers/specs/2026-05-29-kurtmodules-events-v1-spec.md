@@ -140,10 +140,13 @@ events_ticket_types
   mode (string — enum: open|application|rsvp),
   price_minor (unsignedBigInteger default 0), currency (string char(3) default 'USD'),
   refundable (boolean default true),
+  self_cancel_deadline_hours_before_event (unsignedInteger nullable),  -- buyer self-cancel cutoff; null = organizer-only
   capacity (unsignedInteger nullable),                  -- per-type capacity
   sold_count (unsignedBigInteger default 0),
   sale_starts_at, sale_ends_at (timestamps nullable),
   max_per_order (unsignedInteger default 10),
+  minimum_price_minor (unsignedBigInteger nullable),    -- when set, type is pay-what-you-can; buyer-supplied unit price must be >= this
+  suggested_price_minor (unsignedBigInteger nullable),  -- UI hint for flexible pricing
   attendance_form_id (nullable, FK events_attendance_forms, nullOnDelete),
 
   -- Transfers
@@ -650,8 +653,11 @@ final class Events
     /**
      * @param array<int, array{name: string, email: string, user_id?: int|string|null, metadata?: array<string, mixed>}> $holderAssignments
      *        One row per seat; length must equal $quantity. Captures group-ticket assignment at checkout time.
+     * @param int|null $unitPriceMinorOverride
+     *        Buyer-chosen unit price for pay-what-you-can ticket types. Must be >= ticketType.minimum_price_minor.
+     *        Rejected for fixed-price types.
      */
-    public function reserve(TicketType $type, Model $buyer, int $quantity, array $holderAssignments, ?string $discountCode = null): Order;
+    public function reserve(TicketType $type, Model $buyer, int $quantity, array $holderAssignments, ?string $discountCode = null, ?int $unitPriceMinorOverride = null): Order;
     public function pay(Order $order, string $processor, string $reference): void;
     public function transferTicket(Ticket $ticket, Model $newHolder): Ticket;
     public function checkIn(Ticket $ticket, Model $scanner): Attendee;
@@ -663,6 +669,7 @@ final class Events
     public function reject(Application $application, Model $rejector, string $reason): ?Refund;
 
     public function requestRefund(Order|Ticket $target, Model $requester, RefundReason $reason, ?string $note = null): Refund;
+    public function cancelOrderByBuyer(Order $order, Model $buyer): Refund;  // checks self_cancel_deadline + EU window + uncheckedin
     public function markRefundProcessed(Refund $refund, string $processorReference): void;
     public function markRefundFailed(Refund $refund, string $note): void;
 
@@ -711,7 +718,28 @@ The payload JSON contains `{ticket_id, event_id, issued_at, nonce}`. The HMAC us
 
 When replay protection is on, an `events_check_in_attempts` table records `(ticket_id, scanner_user_id, nonce, ip, user_agent, succeeded, failure_reason, occurred_at)`. Re-presented QR tokens for an already-checked-in ticket return the existing Attendee row but log the duplicate attempt for audit.
 
-### 16.3 Search & discovery scopes
+### 16.3 Concurrency model
+
+`Events::reserve(...)` runs inside `DB::transaction(...)`. Inside the transaction, the ticket type row is locked via `SELECT ... FOR UPDATE` (Eloquent's `->lockForUpdate()`). Capacity is checked against `(capacity - sold_count) >= quantity` before incrementing `sold_count`. The lock prevents two concurrent buyers from oversubscribing the last seats.
+
+The same lock pattern protects `events:expire-pending-orders` when it decrements `sold_count`, and `Events::cancelOrderByBuyer()` when it releases held capacity.
+
+Read-heavy paths (search scopes, listing endpoints) do not lock — they tolerate the brief reservation/cancellation window.
+
+### 16.4 Buyer self-cancellation
+
+`Events::cancelOrderByBuyer(Order $order, Model $buyer)` is the buyer-facing cancellation entry point. It:
+
+1. Verifies `$buyer` is the order's `user_id`.
+2. Verifies the order is in `paid` status (cannot self-cancel pending or already-refunded).
+3. Verifies no ticket on the order is `checked_in`.
+4. Computes the strongest applicable allowance:
+   - **EU consumer-protection** (per §13.1) — within `events.refunds.consumer_protection_window_days` and no `consumer_protection_exempt` tickets.
+   - **Per-type self-cancel deadline** — every ticket on the order belongs to a type whose `self_cancel_deadline_hours_before_event` permits `now()` (or whose value is null, meaning no buyer-side allowance).
+5. If neither allowance applies, throws `SelfCancellationNotPermitted` (typed exception). Buyer can still ask the organizer.
+6. Otherwise creates a `Refund` with `reason=attendee_request`, dispatches `RefundRequested`, and returns the Refund row.
+
+### 16.5 Search & discovery scopes
 
 `Event::class` exposes the following query scopes for consumers building list endpoints:
 
@@ -859,6 +887,14 @@ Shipped under `src/Notifications/` (only registered when `config('events.notific
 - `SessionReminderDue` (to attendees of a specific session in a multi-session event)
 
 Each uses `via(['mail', 'database'])` by default; consumer can override.
+
+Default **Blade Mail templates** ship under `resources/views/notifications/*.blade.php`. Each Notification class uses `(new MailMessage)->view('events::notifications.ticket-issued', [...])`. Consumers publish via:
+
+```bash
+php artisan vendor:publish --tag="events-notifications-views"
+```
+
+Published views land in the app's `resources/views/vendor/events/notifications/` and override the defaults automatically. Markdown templates are not shipped — Blade gives consumers full visual control with their existing brand styles.
 
 ## 22. Filament admin (v1.1)
 
