@@ -62,6 +62,33 @@ if (! function_exists('Kurt\Modules\Blog\Tests\formFieldNames')) {
     }
 
     /**
+     * Recursively collect action names from a list that may contain
+     * ActionGroup/BulkActionGroup wrappers.
+     *
+     * @param  iterable<mixed>  $actions
+     * @return array<int, string>
+     */
+    function flattenActionNames(iterable $actions): array
+    {
+        $names = [];
+
+        foreach ($actions as $action) {
+            if (is_object($action) && method_exists($action, 'getName')) {
+                $names[] = $action->getName();
+            }
+
+            if (is_object($action) && method_exists($action, 'getActions')) {
+                $names = array_merge($names, flattenActionNames($action->getActions()));
+            }
+        }
+
+        return array_values(array_filter($names));
+    }
+
+    /**
+     * Bulk action names. v5 keeps them under getFlatBulkActions(); v4 stores
+     * them in the toolbar (getToolbarActions()).
+     *
      * @param  class-string  $resource
      * @param  class-string  $pageClass
      * @return array<int, string>
@@ -70,13 +97,17 @@ if (! function_exists('Kurt\Modules\Blog\Tests\formFieldNames')) {
     {
         $table = $resource::table(Table::make(app($pageClass)));
 
-        return array_values(array_map(
-            static fn ($action): string => $action->getName(),
-            $table->getFlatBulkActions(),
-        ));
+        if (method_exists($table, 'getFlatBulkActions')) {
+            return flattenActionNames($table->getFlatBulkActions());
+        }
+
+        return flattenActionNames($table->getToolbarActions());
     }
 
     /**
+     * Row action names. v5 keeps them under getFlatActions(); v4 stores them
+     * in getRecordActions().
+     *
      * @param  class-string  $resource
      * @param  class-string  $pageClass
      * @return array<int, string>
@@ -85,9 +116,10 @@ if (! function_exists('Kurt\Modules\Blog\Tests\formFieldNames')) {
     {
         $table = $resource::table(Table::make(app($pageClass)));
 
-        return array_values(array_map(
-            static fn ($action): string => $action->getName(),
-            $table->getFlatActions(),
-        ));
+        if (method_exists($table, 'getFlatActions')) {
+            return flattenActionNames($table->getFlatActions());
+        }
+
+        return flattenActionNames($table->getRecordActions());
     }
 }
