@@ -37,13 +37,7 @@ final class BlogServiceProvider extends PackageServiceProvider
             ->name('laravel-modules-blog')
             ->hasConfigFile('blog')
             ->hasTranslations()
-            ->hasMigrations([
-                'create_blog_categories_table',
-                'create_blog_tags_table',
-                'create_blog_posts_table',
-                'create_blog_post_tag_table',
-                'create_blog_comments_table',
-            ])
+            ->discoversMigrations()
             ->hasCommands([
                 PublishDuePostsCommand::class,
                 UpgradeTranslationsCommand::class,
