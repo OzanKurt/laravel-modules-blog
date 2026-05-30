@@ -5,6 +5,21 @@ parameters:
     level: 8
     paths:
         - src
+    excludePaths:
+        analyseAndScan:
+            # The three Filament version dirs reference mutually-exclusive
+            # namespaces; only one Filament major is ever installed. The base
+            # config analyses non-Filament src only. Each version dir is
+            # analysed by its matching phpstan-filament-v{3,4,5}.neon in CI.
+            # `(?)` marks them optional so analysis works whether or not the
+            # dir exists yet (the per-version configs re-include this base).
+            - src/Filament/V3 (?)
+            - src/Filament/V4 (?)
+            - src/Filament/V5 (?)
+            # The version-dispatching facade is the one file that references
+            # all three version namespaces by design, so it cannot be analysed
+            # under any single-version config. Covered by runtime smoke tests.
+            - src/Filament/BlogPlugin.php
     tmpDir: build/phpstan
     reportUnmatchedIgnoredErrors: false
     ignoreErrors:

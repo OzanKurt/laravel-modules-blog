@@ -4,6 +4,16 @@ All notable changes follow [Keep a Changelog](https://keepachangelog.com/en/1.1.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-05-30
+
+### Added
+- Filament admin resources for **v3, v4, and v5** in parallel: `PostResource`, `CategoryResource`, `TagResource`, `CommentResource` under `src/Filament/V{3,4,5}`.
+- Version-dispatching `Kurt\Modules\Blog\Filament\BlogPlugin` facade — register `->plugin(BlogPlugin::make())` on your panel and the matching V{n} resource set is resolved from the installed Filament major via Core's `FilamentVersion`.
+- Post form with per-locale (en/tr) translatable title/excerpt/body and SEO meta, status/type enum selects, conditional `scheduled_for` (status=scheduled) and `video_url` (type=video) fields, category + tags relationship selects, and a `SpatieMediaLibraryFileUpload` cover; Comment moderation queue with approve/reject row + bulk actions.
+- `filament/spatie-laravel-media-library-plugin` (`^3.0 || ^4.0 || ^5.0`) added to `require-dev` for the Post cover upload.
+- Per-Filament-version PHPStan configs (`phpstan-filament-v{3,4,5}.neon`); the base `phpstan.neon` excludes the three version dirs and the dispatching facade.
+- CI matrix gains a Filament axis (`3.*`, `4.*`, `5.*`) with a per-major PHPStan step.
+
 ## [2.0.1] - 2026-05-30
 
 ### Fixed

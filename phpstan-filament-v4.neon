@@ -1,0 +1,13 @@
+includes:
+    - phpstan.neon
+
+# Analyse the Filament v4 resources only. Run in the CI matrix cell where
+# filament/filament:4.* is installed. The `!` overrides the base config's
+# exclude list so only the other two version dirs (and the facade) stay
+# excluded, leaving src/Filament/V4 analysed.
+parameters:
+    excludePaths:
+        analyseAndScan!:
+            - src/Filament/V3 (?)
+            - src/Filament/V5 (?)
+            - src/Filament/BlogPlugin.php
