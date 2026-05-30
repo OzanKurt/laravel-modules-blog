@@ -5,6 +5,16 @@ parameters:
     level: 8
     paths:
         - src
+    excludePaths:
+        # The three Filament version dirs reference mutually-exclusive
+        # namespaces; only one Filament major is ever installed. The base
+        # config analyses non-Filament src only. Each version dir is analysed
+        # by its matching phpstan-filament-v{3,4,5}.neon in the CI matrix.
+        # `(?)` marks them optional so analysis works whether or not the dir
+        # exists yet (and the per-version configs re-include this base).
+        - src/Filament/V3 (?)
+        - src/Filament/V4 (?)
+        - src/Filament/V5 (?)
     tmpDir: build/phpstan
     reportUnmatchedIgnoredErrors: false
     ignoreErrors:
