@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Filament\Forms\Form;
 use Filament\Schemas\Schema;
 use Filament\Tables\Table;
 use Kurt\Modules\Blog\Tests\TestCase;
@@ -24,17 +25,33 @@ pest()->extend(TestCase::class)->in('Feature');
 |
 */
 
-if (! function_exists('Kurt\Modules\Blog\Tests\formFieldNames')) {
+if (! function_exists('formFilamentContainer')) {
+    /**
+     * Build the form container Filament passes to a resource's static form().
+     * v4/v5 use Filament\Schemas\Schema; v3 uses Filament\Forms\Form. Both
+     * accept the owning Livewire component and expose getFlatFields().
+     *
+     * @param  class-string  $pageClass
+     */
+    function formFilamentContainer(string $pageClass): object
+    {
+        $container = class_exists(Schema::class)
+            ? Schema::class
+            : Form::class;
+
+        return $container::make(app($pageClass));
+    }
+
     /**
      * @param  class-string  $resource  The resource class (form() is static).
-     * @param  class-string  $pageClass  A page of the resource, used as the schema container.
+     * @param  class-string  $pageClass  A page of the resource, used as the form container.
      * @return array<int, string>
      */
     function formFieldNames(string $resource, string $pageClass): array
     {
-        $schema = $resource::form(Schema::make(app($pageClass)));
+        $form = $resource::form(formFilamentContainer($pageClass));
 
-        return array_keys($schema->getFlatFields(withHidden: true));
+        return array_keys($form->getFlatFields(withHidden: true));
     }
 
     /**
