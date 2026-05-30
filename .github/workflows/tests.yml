@@ -16,15 +16,14 @@ jobs:
             matrix:
                 php: ['8.4']
                 laravel: ['12.*']
+                filament: ['3.*', '4.*', '5.*']
                 include:
                     - laravel: 12.*
                       testbench: 10.*
                 # Laravel 13 will be added once pestphp/pest-plugin-laravel
                 # publishes a release supporting laravel/framework ^13.0.
-                # Filament axis is pending v2.1 — admin resources are not
-                # shipped in v2.0 (module is headless).
 
-        name: PHP ${{ matrix.php }} - Laravel ${{ matrix.laravel }}
+        name: PHP ${{ matrix.php }} - Laravel ${{ matrix.laravel }} - Filament ${{ matrix.filament }}
 
         steps:
             - uses: actions/checkout@v4
@@ -40,15 +39,17 @@ jobs:
               uses: actions/cache@v4
               with:
                   path: ~/.composer/cache
-                  key: composer-${{ matrix.php }}-${{ matrix.laravel }}-${{ hashFiles('composer.json') }}
+                  key: composer-${{ matrix.php }}-${{ matrix.laravel }}-${{ matrix.filament }}-${{ hashFiles('composer.json') }}
 
-            - name: Require Laravel ${{ matrix.laravel }}
+            - name: Require Laravel ${{ matrix.laravel }} + Filament ${{ matrix.filament }}
               run: |
                   composer require --no-update --no-interaction \
                       "illuminate/contracts:${{ matrix.laravel }}" \
                       "illuminate/database:${{ matrix.laravel }}" \
                       "illuminate/support:${{ matrix.laravel }}" \
-                      "orchestra/testbench:${{ matrix.testbench }}"
+                      "orchestra/testbench:${{ matrix.testbench }}" \
+                      "filament/filament:${{ matrix.filament }}" \
+                      "filament/spatie-laravel-media-library-plugin:${{ matrix.filament }}"
 
             - name: Install
               run: composer update --prefer-stable --prefer-dist --no-interaction
@@ -56,8 +57,10 @@ jobs:
             - name: Pint
               run: vendor/bin/pint --test
 
-            - name: PHPStan
-              run: vendor/bin/phpstan analyse --memory-limit=2G
+            - name: PHPStan (Filament ${{ matrix.filament }})
+              run: |
+                  MAJOR=$(echo "${{ matrix.filament }}" | cut -d. -f1)
+                  vendor/bin/phpstan analyse -c "phpstan-filament-v${MAJOR}.neon" --memory-limit=2G
 
             - name: Pest
               run: vendor/bin/pest
