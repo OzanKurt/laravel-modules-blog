@@ -4,6 +4,12 @@ All notable changes follow [Keep a Changelog](https://keepachangelog.com/en/1.1.
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-05-31
+
+### Removed
+- The legacy `blog_comments` table and its data migration. Comments live in the
+  shared `interactions_comments` store from a fresh install.
+
 ## [2.2.0] - 2026-05-31
 
 ### Changed
@@ -14,7 +20,6 @@ All notable changes follow [Keep a Changelog](https://keepachangelog.com/en/1.1.
 ### Added
 
 - `ozankurt/laravel-modules-interactions` (`^1.3`) dependency.
-- A data migration that copies existing `blog_comments` into `interactions_comments` — mapping `approval`→`status` and approver/rejecter→`moderated_by` / `moderated_at`, and preserving threading via parent-id remapping — then drops the legacy table. Guarded and no-op when either table is absent.
 
 ## [2.1.0] - 2026-05-30
 
