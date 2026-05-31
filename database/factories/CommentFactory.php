@@ -31,7 +31,6 @@ class CommentFactory extends Factory
     {
         return $this->state(fn () => [
             'approval' => CommentApproval::Approved,
-            'approved_at' => now(),
         ]);
     }
 }

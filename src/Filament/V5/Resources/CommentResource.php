@@ -21,11 +21,13 @@ use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Kurt\Modules\Blog\Enums\CommentApproval;
 use Kurt\Modules\Blog\Filament\V5\Resources\CommentResource\Pages;
 use Kurt\Modules\Blog\Models\Comment;
+use Kurt\Modules\Interactions\Comments\Enums\CommentStatus;
 
 class CommentResource extends Resource
 {
@@ -66,8 +68,7 @@ class CommentResource extends Resource
                         CommentApproval::Approved => 'success',
                         CommentApproval::Rejected => 'danger',
                         default => 'warning',
-                    })
-                    ->sortable(),
+                    }),
                 TextColumn::make('author.name')
                     ->label('Author')
                     ->toggleable(),
@@ -83,7 +84,20 @@ class CommentResource extends Resource
             ->filters([
                 SelectFilter::make('approval')
                     ->options(CommentApproval::class)
-                    ->default(CommentApproval::Pending->value),
+                    ->default(CommentApproval::Pending->value)
+                    ->query(function (Builder $query, array $data): Builder {
+                        $value = $data['value'] ?? null;
+
+                        if ($value === null || $value === '') {
+                            return $query;
+                        }
+
+                        return $query->where('status', match (CommentApproval::from((string) $value)) {
+                            CommentApproval::Approved => CommentStatus::Published->value,
+                            CommentApproval::Rejected => CommentStatus::Spam->value,
+                            CommentApproval::Pending => CommentStatus::Pending->value,
+                        });
+                    }),
             ])
             ->actions([
                 Action::make('approve')

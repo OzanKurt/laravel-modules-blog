@@ -4,6 +4,18 @@ All notable changes follow [Keep a Changelog](https://keepachangelog.com/en/1.1.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-05-31
+
+### Changed
+
+- **Comments now persist through the [Interactions](https://github.com/OzanKurt/KurtModules-Interactions) module** instead of the Blog-local `blog_comments` table. `Comment` extends the Interactions comment, inheriting threading, revisions, soft-deletes, reactions, mentions, and a moderation audit trail while keeping the Blog-facing API: a `post_id` shim onto the polymorphic `commentable`, the `approval` enum mapped onto the Interactions `status` (pending↔Pending, approved↔Published, rejected↔Spam), and `approve()` / `reject()` — which now record `moderated_by` / `moderated_at` and still fire `CommentApproved` / `CommentRejected`.
+- `Post::comments()` / `Post::approvedComments()` are now polymorphic `MorphMany` relations to the shared store.
+
+### Added
+
+- `ozankurt/laravel-modules-interactions` (`^1.3`) dependency.
+- A data migration that copies existing `blog_comments` into `interactions_comments` — mapping `approval`→`status` and approver/rejecter→`moderated_by` / `moderated_at`, and preserving threading via parent-id remapping — then drops the legacy table. Guarded and no-op when either table is absent.
+
 ## [2.1.0] - 2026-05-30
 
 ### Added

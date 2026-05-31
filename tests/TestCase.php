@@ -20,6 +20,7 @@ use Kurt\Modules\Blog\Tests\Fixtures\AdminPanelProvider;
 use Kurt\Modules\Core\Providers\CoreServiceProvider;
 use Kurt\Modules\Core\Support\FilamentVersion;
 use Kurt\Modules\Core\Testing\PackageTestCase;
+use Kurt\Modules\Interactions\Providers\InteractionsServiceProvider;
 use Livewire\LivewireServiceProvider;
 use Spatie\MediaLibrary\MediaLibraryServiceProvider;
 
@@ -50,6 +51,7 @@ abstract class TestCase extends PackageTestCase
         return array_merge([
             SluggableServiceProvider::class,
             MediaLibraryServiceProvider::class,
+            InteractionsServiceProvider::class,
             BlogServiceProvider::class,
         ], $this->filamentProviders());
     }
@@ -64,6 +66,7 @@ abstract class TestCase extends PackageTestCase
             CoreServiceProvider::class,
             SluggableServiceProvider::class,
             MediaLibraryServiceProvider::class,
+            InteractionsServiceProvider::class,
             BlogServiceProvider::class,
         ], $this->filamentProviders());
     }
@@ -123,5 +126,13 @@ abstract class TestCase extends PackageTestCase
         // Medialibrary's media table (needed by Post HasMedia).
         $this->loadMigrationsFrom(__DIR__.'/migrations');
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+
+        // The Interactions package owns the comment store that Blog comments now
+        // live in; load its migrations so interactions_comments (and the
+        // blog→interactions data migration) are present during tests.
+        $this->loadMigrationsFrom(dirname(
+            (string) (new \ReflectionClass(InteractionsServiceProvider::class))->getFileName(),
+            3,
+        ).'/database/migrations');
     }
 }

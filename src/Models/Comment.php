@@ -9,55 +9,57 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 use Kurt\Modules\Blog\Enums\CommentApproval;
 use Kurt\Modules\Blog\Events\CommentApproved;
 use Kurt\Modules\Blog\Events\CommentRejected;
-use Kurt\Modules\Core\Concerns\ResolvesUser;
+use Kurt\Modules\Interactions\Comments\Enums\CommentStatus;
+use Kurt\Modules\Interactions\Comments\Models\Comment as InteractionsComment;
 
 /**
+ * Blog comments live in the shared Interactions comment store
+ * (`interactions_comments`) and inherit threading, revisions, soft-deletes,
+ * reactions, mentions, and the moderation audit trail from the Interactions
+ * Comment. This subclass keeps the Blog-facing API:
+ *
+ * - a `post_id` shim onto the polymorphic `commentable` (Blog comments are
+ *   always attached to a Post);
+ * - an `approval` enum mapped onto the Interactions `status`
+ *   (pending↔Pending, approved↔Published, rejected↔Spam);
+ * - approve()/reject() verbs that record the moderator (moderated_by/at) and
+ *   fire the Blog moderation events.
+ *
  * @property int $id
  * @property int $post_id
  * @property int $user_id
  * @property int|null $parent_id
  * @property string $body
- * @property CommentApproval|null $approval
- * @property Carbon|null $approved_at
- * @property Carbon|null $rejected_at
- * @property int|null $approved_by
- * @property int|null $rejected_by
+ * @property CommentApproval $approval
+ * @property CommentStatus $status
+ * @property int|null $moderated_by
+ * @property Carbon|null $moderated_at
  */
-class Comment extends Model
+class Comment extends InteractionsComment
 {
     /** @use HasFactory<CommentFactory> */
     use HasFactory;
 
-    use ResolvesUser;
-    use SoftDeletes;
-
-    protected $table = 'blog_comments';
-
     /** @var list<string> */
     protected $fillable = [
         'post_id', 'user_id', 'parent_id', 'body', 'approval',
-        'approved_at', 'rejected_at', 'approved_by', 'rejected_by',
-    ];
-
-    /** @var array<string, string> */
-    protected $casts = [
-        'approval' => CommentApproval::class,
-        'approved_at' => 'datetime',
-        'rejected_at' => 'datetime',
+        'commentable_type', 'commentable_id', 'status',
+        'moderated_by', 'moderated_at', 'edited_at',
     ];
 
     /**
+     * The Blog post behind the polymorphic commentable. Blog comments are
+     * always attached to a Post, so `commentable_id` resolves as a Post key.
+     *
      * @return BelongsTo<Post, $this>
      */
     public function post(): BelongsTo
     {
-        return $this->belongsTo(Post::class);
+        return $this->belongsTo(Post::class, 'commentable_id');
     }
 
     /**
@@ -65,31 +67,40 @@ class Comment extends Model
      */
     public function user(): BelongsTo
     {
-        return $this->userBelongsTo();
+        return $this->author();
     }
 
-    /**
-     * @return BelongsTo<Model, $this>
-     */
-    public function author(): BelongsTo
+    public function getPostIdAttribute(): ?int
     {
-        return $this->user();
+        $id = $this->attributes['commentable_id'] ?? null;
+
+        return $id === null ? null : (int) $id;
     }
 
-    /**
-     * @return BelongsTo<self, $this>
-     */
-    public function parent(): BelongsTo
+    public function setPostIdAttribute(int|string $value): void
     {
-        return $this->belongsTo(self::class, 'parent_id');
+        $this->attributes['commentable_type'] = (new Post)->getMorphClass();
+        $this->attributes['commentable_id'] = (int) $value;
     }
 
-    /**
-     * @return HasMany<self, $this>
-     */
-    public function replies(): HasMany
+    public function getApprovalAttribute(): CommentApproval
     {
-        return $this->hasMany(self::class, 'parent_id');
+        return match ($this->status) {
+            CommentStatus::Published => CommentApproval::Approved,
+            CommentStatus::Spam => CommentApproval::Rejected,
+            default => CommentApproval::Pending,
+        };
+    }
+
+    public function setApprovalAttribute(CommentApproval|string $value): void
+    {
+        $approval = $value instanceof CommentApproval ? $value : CommentApproval::from($value);
+
+        $this->attributes['status'] = match ($approval) {
+            CommentApproval::Approved => CommentStatus::Published->value,
+            CommentApproval::Rejected => CommentStatus::Spam->value,
+            CommentApproval::Pending => CommentStatus::Pending->value,
+        };
     }
 
     /**
@@ -98,7 +109,7 @@ class Comment extends Model
      */
     public function scopeApproved(Builder $q): Builder
     {
-        return $q->where('approval', CommentApproval::Approved->value);
+        return $q->where('status', CommentStatus::Published->value);
     }
 
     /**
@@ -107,20 +118,20 @@ class Comment extends Model
      */
     public function scopePending(Builder $q): Builder
     {
-        return $q->where('approval', CommentApproval::Pending->value);
+        return $q->where('status', CommentStatus::Pending->value);
     }
 
     public function isApproved(): bool
     {
-        return $this->approval === CommentApproval::Approved;
+        return $this->status === CommentStatus::Published;
     }
 
     public function approve(Model $approver): self
     {
         $this->forceFill([
-            'approval' => CommentApproval::Approved,
-            'approved_at' => now(),
-            'approved_by' => $approver->getKey(),
+            'status' => CommentStatus::Published->value,
+            'moderated_by' => $approver->getKey(),
+            'moderated_at' => now(),
         ])->save();
 
         $this->refresh();
@@ -133,9 +144,9 @@ class Comment extends Model
     public function reject(Model $rejector): self
     {
         $this->forceFill([
-            'approval' => CommentApproval::Rejected,
-            'rejected_at' => now(),
-            'rejected_by' => $rejector->getKey(),
+            'status' => CommentStatus::Spam->value,
+            'moderated_by' => $rejector->getKey(),
+            'moderated_at' => now(),
         ])->save();
 
         $this->refresh();

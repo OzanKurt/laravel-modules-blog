@@ -11,16 +11,16 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
-use Kurt\Modules\Blog\Enums\CommentApproval;
 use Kurt\Modules\Blog\Enums\PostStatus;
 use Kurt\Modules\Blog\Enums\PostType;
 use Kurt\Modules\Blog\Support\SeoMetadata;
 use Kurt\Modules\Blog\Support\VideoSource;
 use Kurt\Modules\Blog\Support\VideoUrl;
 use Kurt\Modules\Core\Concerns\ResolvesUser;
+use Kurt\Modules\Interactions\Comments\Enums\CommentStatus;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
@@ -111,19 +111,19 @@ class Post extends Model implements HasMedia
     }
 
     /**
-     * @return HasMany<Comment, $this>
+     * @return MorphMany<Comment, $this>
      */
-    public function comments(): HasMany
+    public function comments(): MorphMany
     {
-        return $this->hasMany(Comment::class);
+        return $this->morphMany(Comment::class, 'commentable');
     }
 
     /**
-     * @return HasMany<Comment, $this>
+     * @return MorphMany<Comment, $this>
      */
-    public function approvedComments(): HasMany
+    public function approvedComments(): MorphMany
     {
-        return $this->comments()->where('approval', CommentApproval::Approved->value);
+        return $this->comments()->where('status', CommentStatus::Published->value);
     }
 
     /**
