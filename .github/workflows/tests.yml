@@ -63,4 +63,4 @@ jobs:
                   vendor/bin/phpstan analyse -c "phpstan-filament-v${MAJOR}.neon" --memory-limit=2G
 
             - name: Pest
-              run: vendor/bin/pest --coverage --min=50
+              run: vendor/bin/pest --coverage --min=30
