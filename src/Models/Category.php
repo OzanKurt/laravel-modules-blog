@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 use Spatie\Translatable\HasTranslations;
 
 /**
@@ -21,6 +22,8 @@ use Spatie\Translatable\HasTranslations;
  * @property string|null $description
  * @property int|null $parent_id
  * @property int $position
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
  */
 class Category extends Model
 {

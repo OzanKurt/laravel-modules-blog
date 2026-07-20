@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 use Spatie\Translatable\HasTranslations;
 
 /**
@@ -18,6 +19,8 @@ use Spatie\Translatable\HasTranslations;
  * @property string $name
  * @property string|null $description
  * @property string|null $color
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
  */
 class Tag extends Model
 {

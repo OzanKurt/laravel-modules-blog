@@ -41,4 +41,22 @@ return [
     ],
 
     'route_prefix' => 'blog',
+
+    // FeedBuilder defaults. `title`/`description` fall back to the app name and
+    // a generic label when null; `limit` caps how many latest posts a feed
+    // carries. All are overridable per feed via the builder's fluent setters.
+    'feed' => [
+        'title' => null,
+        'description' => 'Latest posts',
+        'limit' => 20,
+    ],
+
+    // SitemapBuilder per-type change frequencies.
+    'sitemap' => [
+        'changefreq' => [
+            'posts' => 'weekly',
+            'categories' => 'daily',
+            'tags' => 'weekly',
+        ],
+    ],
 ];
