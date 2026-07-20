@@ -7,6 +7,7 @@ namespace Kurt\Modules\Blog\Models;
 use Cviebrock\EloquentSluggable\Sluggable;
 use Database\Factories\Kurt\Modules\Blog\PostFactory;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -14,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Kurt\Modules\Blog\Enums\PostStatus;
 use Kurt\Modules\Blog\Enums\PostType;
 use Kurt\Modules\Blog\Support\SeoMetadata;
@@ -44,6 +46,8 @@ use Spatie\Translatable\HasTranslations;
  * @property string|null $meta_title
  * @property string|null $meta_description
  * @property string|null $meta_og_image
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
  */
 class Post extends Model implements HasMedia
 {
@@ -235,6 +239,82 @@ class Post extends Model implements HasMedia
     public function scopeAuthoredBy(Builder $q, Model|int $user): Builder
     {
         return $q->where('user_id', $user instanceof Model ? $user->getKey() : $user);
+    }
+
+    /**
+     * Rank published, non-self posts by relatedness to $post: posts that share
+     * the most tags come first, then a shared category acts as a fallback so
+     * loosely-tagged posts still surface neighbours. The scope emits two
+     * computed columns, `shared_tags` and `shared_category`, used only for
+     * ordering. It runs as a single query (no N+1): the current post's tag ids
+     * are the only thing loaded up front, and the overlap count is a correlated
+     * subquery over the pivot rather than a per-candidate lookup.
+     *
+     * @param  Builder<self>  $q
+     * @return Builder<self>
+     */
+    public function scopeRelatedTo(Builder $q, self $post): Builder
+    {
+        $tagIds = $post->tags()->pluck('blog_tags.id')->all();
+        $categoryId = $post->category_id;
+
+        $q->select('blog_posts.*')
+            ->published()
+            ->whereKeyNot($post->getKey());
+
+        // A post with neither tags nor a category has nothing to relate to;
+        // short-circuit to an empty result rather than returning random posts.
+        if ($tagIds === [] && $categoryId === null) {
+            return $q->whereRaw('1 = 0')
+                ->selectRaw('0 as shared_tags')
+                ->selectRaw('0 as shared_category');
+        }
+
+        // shared_tags: how many of $post's tags each candidate also carries.
+        if ($tagIds === []) {
+            $q->selectRaw('0 as shared_tags');
+        } else {
+            $q->selectSub(
+                DB::table('blog_post_tag')
+                    ->selectRaw('count(*)')
+                    ->whereColumn('blog_post_tag.post_id', 'blog_posts.id')
+                    ->whereIn('blog_post_tag.tag_id', $tagIds),
+                'shared_tags',
+            );
+        }
+
+        // shared_category: 1 when the candidate sits in $post's category, else 0.
+        $q->selectRaw('case when blog_posts.category_id = ? then 1 else 0 end as shared_category', [$categoryId]);
+
+        // Restrict to genuine neighbours: a candidate must share at least one
+        // tag or the category, otherwise it is not related and would only pad
+        // the list.
+        $q->where(function (Builder $w) use ($tagIds, $categoryId): void {
+            if ($tagIds !== []) {
+                $w->whereHas('tags', fn (Builder $t) => $t->whereIn('blog_tags.id', $tagIds));
+            }
+
+            if ($categoryId !== null) {
+                $w->orWhere('blog_posts.category_id', $categoryId);
+            }
+        });
+
+        return $q
+            ->orderByDesc('shared_tags')
+            ->orderByDesc('shared_category')
+            ->orderByDesc('published_at')
+            ->orderByDesc('id');
+    }
+
+    /**
+     * Published, non-self posts most related to this one: shared tags first,
+     * then a shared category, newest as the final tiebreaker.
+     *
+     * @return Collection<int, self>
+     */
+    public function related(int $limit = 5): Collection
+    {
+        return static::relatedTo($this)->limit(max(1, $limit))->get();
     }
 
     public function videoSource(): ?VideoSource

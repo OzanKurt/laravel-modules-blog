@@ -4,6 +4,20 @@ All notable changes follow [Keep a Changelog](https://keepachangelog.com/en/1.1.
 
 ## [Unreleased]
 
+### Added
+- **Related posts** — `Post::related(int $limit = 5)` (backed by a `relatedTo`
+  scope) returns published, non-self posts ranked by shared-tag overlap and
+  then a shared category, in a single N+1-free query.
+- **RSS / feed data** — `Kurt\Modules\Blog\Support\FeedBuilder` produces a valid
+  RSS 2.0 XML string (`toRss()`) or a plain data structure (`toArray()`) for the
+  latest published posts, with configurable count and optional per-category
+  scoping. Headless: the consuming app wires it to a route.
+- **Sitemap hooks** — `Kurt\Modules\Blog\Support\SitemapBuilder` returns
+  `SitemapEntry` (loc/lastmod/changefreq/priority) rows for published posts,
+  categories with published posts, and (opt-in) tags, for the app to feed into
+  its own sitemap.
+- `feed` and `sitemap` default blocks in `config/blog.php`.
+
 ## [2.2.1] - 2026-05-31
 
 ### Removed
