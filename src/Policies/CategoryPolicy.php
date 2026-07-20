@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Kurt\Modules\Blog\Policies;
 
+use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Kurt\Modules\Blog\Models\Category;
 
@@ -31,6 +32,6 @@ final class CategoryPolicy
 
     private function isStaff(Authenticatable $user): bool
     {
-        return app('gate')->allows('canManageBlog', $user);
+        return app(Gate::class)->allows('canManageBlog', $user);
     }
 }

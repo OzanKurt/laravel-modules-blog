@@ -6,7 +6,7 @@ Headless blog module for Laravel: posts, categories, tags, comments, scheduled p
 
 - PHP 8.4+
 - Laravel 12.x or 13.x
-- `ozankurt/laravel-modules-core` v2.x
+- `ozankurt/laravel-modules-core` v2.2+ (ships the API kit)
 
 ## Installation
 
@@ -30,6 +30,7 @@ php artisan migrate
 - `Kurt\Modules\Blog\Support\VideoUrl::parse()` for YouTube / Vimeo / DailyMotion URL parsing.
 - `Kurt\Modules\Blog\Support\SeoMetadata::forPost()` for SEO meta resolution.
 - `Kurt\Modules\Blog\Support\FeedBuilder` for RSS 2.0 / feed data, and `SitemapBuilder` for sitemap entries — see [Headless helpers](#headless-helpers).
+- An opt-in JSON REST API (posts, categories, tags, comments + `publish`/`unpublish`/`related` actions) — see [API](#api).
 - Console commands: `blog:publish-due`, `blog:upgrade-translations`, `blog:demo`.
 - Domain events: `PostCreated`, `PostUpdated`, `PostPublished`, `PostArchived`, `CommentCreated`, `CommentApproved`, `CommentRejected`, ...
 
@@ -111,6 +112,84 @@ $rows = SitemapBuilder::make()->toArray();            // array of loc/lastmod/..
 Feed the entries into whichever sitemap package or response your app already
 uses. Per-type change frequencies live under the `sitemap` key in
 `config/blog.php`.
+
+## API
+
+The module ships an out-of-the-box JSON REST API built on the Core API kit
+(`ozankurt/laravel-modules-core` v2.2+). It is **safe by default**: nothing is
+registered until you opt in.
+
+### Enabling
+
+Set the mode to `api` (or `ui`) — headless registers no routes:
+
+```dotenv
+BLOG_HTTP_MODE=api
+```
+
+Everything is driven by the `http` block published to `config/blog.php`:
+
+```php
+'http' => [
+    'mode' => env('BLOG_HTTP_MODE', 'headless'), // headless | api | ui
+    'prefix' => 'api/blog',                       // URL prefix for every route
+    'middleware' => ['api'],                      // base middleware (all routes)
+    'auth_middleware' => ['auth'],                // added to write routes; e.g. ['auth:sanctum']
+    'rate_limit' => '60,1',                        // maxAttempts,decayMinutes for throttle:blog-api
+],
+```
+
+Every route is throttled by the named `blog-api` limiter (keyed by user id, or
+client IP for guests).
+
+### Endpoints
+
+All paths are relative to the configured prefix (default `/api/blog`). Responses
+use the Core `{ "data": ..., "meta": ... }` envelope; index endpoints add
+`meta.pagination`.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/posts` | public | List posts. `?sort=created_at,-published_at,title`, `?filter[category]=`, `?filter[status]=`, `?filter[author]=`, `?per_page=`. |
+| GET | `/posts/{id\|slug}` | public | Show a post by id or slug. |
+| POST | `/posts` | auth | Create a post (authored by the current user). |
+| PATCH/PUT | `/posts/{id\|slug}` | auth | Update a post. |
+| DELETE | `/posts/{id\|slug}` | auth | Soft-delete a post (204). |
+| POST | `/posts/{id\|slug}/publish` | auth | Publish now (backfills `published_at`). |
+| POST | `/posts/{id\|slug}/unpublish` | auth | Revert to draft. |
+| GET | `/posts/{id\|slug}/related` | public | Related posts (shared tags, then category). `?limit=`. |
+| GET | `/posts/{id\|slug}/comments` | public | Approved comments for a post (staff see all). |
+| POST | `/posts/{id\|slug}/comments` | auth | Add a comment to a post (201). |
+| PATCH/PUT | `/comments/{id}` | auth | Edit a comment. |
+| DELETE | `/comments/{id}` | auth | Soft-delete a comment (204). |
+| GET | `/categories` | public | List categories. |
+| GET | `/categories/{id}` | public | Show a category. |
+| POST | `/categories` | auth | Create a category. |
+| PATCH/PUT | `/categories/{id}` | auth | Update a category. |
+| DELETE | `/categories/{id}` | auth | Soft-delete a category (204). |
+| GET | `/tags` | public | List tags. |
+| GET | `/tags/{id}` | public | Show a tag. |
+| POST | `/tags` | auth | Create a tag. |
+| DELETE | `/tags/{id}` | auth | Soft-delete a tag (204). |
+
+### Auth & policies
+
+- **Reads are public** and respect the published scope: guests and non-staff
+  readers only see published posts (an authenticated reader also sees their own
+  drafts; staff see everything). Requesting a draft you may not view returns 403.
+- **Writes require authentication** (the `auth_middleware`) and are additionally
+  guarded by the module's Policies (`PostPolicy`, `CommentPolicy`,
+  `CategoryPolicy`, `TagPolicy`) via `$this->authorize()` in every write action.
+  Post/comment writes allow the owner or staff; category/tag writes are
+  staff-only. "Staff" is whatever your app grants through the `canManageBlog`
+  gate — define it in your `AuthServiceProvider`:
+
+  ```php
+  Gate::define('canManageBlog', fn ($user) => $user->is_admin);
+  ```
+
+Requests are validated with FormRequests, so invalid payloads return the
+standard `422` `{ "message": ..., "errors": ... }` envelope.
 
 ## Filament admin
 
