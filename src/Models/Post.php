@@ -253,7 +253,15 @@ class Post extends Model implements HasMedia
      */
     public function recordView(?string $ip = null): self
     {
+        // Disable timestamps for the duration of the increment so recording a
+        // view never bumps updated_at; otherwise read traffic would masquerade
+        // as a content edit (and defeat scopeLatest-style ordering / caching).
+        $timestamps = $this->timestamps;
+        $this->timestamps = false;
+
         $this->increment('view_count', 1, $ip === null ? [] : ['last_viewer_ip' => $ip]);
+
+        $this->timestamps = $timestamps;
 
         return $this;
     }

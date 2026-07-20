@@ -77,7 +77,9 @@ class Category extends Model
      */
     public function scopePopular(Builder $q, bool $desc = true): Builder
     {
-        return $q->withCount('posts')->orderBy('posts_count', $desc ? 'desc' : 'asc');
+        return $q
+            ->withCount(['posts' => fn ($posts) => $posts->published()])
+            ->orderBy('posts_count', $desc ? 'desc' : 'asc');
     }
 
     protected static function newFactory(): CategoryFactory

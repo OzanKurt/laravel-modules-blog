@@ -45,6 +45,24 @@ class Comment extends InteractionsComment
     use HasFactory;
 
     /**
+     * Isolate Blog comments from the shared `interactions_comments` store:
+     * every query on this subclass is constrained to comments whose
+     * commentable is a Post. Without this, Comment::query(),
+     * scopeApproved()/scopePending(), and the Filament CommentResource would
+     * surface (and moderate) every other module's comments, and post() would
+     * blindly cast a foreign commentable to a Post.
+     */
+    protected static function booted(): void
+    {
+        static::addGlobalScope('blogCommentable', function (Builder $builder): void {
+            $builder->where(
+                $builder->qualifyColumn('commentable_type'),
+                (new Post)->getMorphClass(),
+            );
+        });
+    }
+
+    /**
      * Moderation fields (`status`, `approval`, `moderated_by`, `moderated_at`)
      * are deliberately NOT mass-assignable: they may only be set through the
      * approve()/reject() verbs and the CommentObserver defaults, so untrusted

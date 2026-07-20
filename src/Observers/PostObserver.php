@@ -13,6 +13,18 @@ use Kurt\Modules\Blog\Models\Post;
 
 final class PostObserver
 {
+    public function saving(Post $post): void
+    {
+        // Backfill the publish timestamp when a post is set Published without
+        // an explicit published_at (e.g. the manual "Published" toggle in the
+        // Filament editor). A saving hook covers every Filament version and
+        // keeps scopePublished()/PostPolicy::view() treating it as live at
+        // once instead of leaving it invisible behind a null published_at.
+        if ($post->status === PostStatus::Published && $post->published_at === null) {
+            $post->published_at = now();
+        }
+    }
+
     public function created(Post $post): void
     {
         PostCreated::dispatch($post);
