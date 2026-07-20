@@ -44,11 +44,17 @@ class Comment extends InteractionsComment
     /** @use HasFactory<CommentFactory> */
     use HasFactory;
 
-    /** @var list<string> */
+    /**
+     * Moderation fields (`status`, `approval`, `moderated_by`, `moderated_at`)
+     * are deliberately NOT mass-assignable: they may only be set through the
+     * approve()/reject() verbs and the CommentObserver defaults, so untrusted
+     * input to Comment::create() can never self-approve or spoof a moderator.
+     *
+     * @var list<string>
+     */
     protected $fillable = [
-        'post_id', 'user_id', 'parent_id', 'body', 'approval',
-        'commentable_type', 'commentable_id', 'status',
-        'moderated_by', 'moderated_at', 'edited_at',
+        'post_id', 'user_id', 'parent_id', 'body',
+        'commentable_type', 'commentable_id', 'edited_at',
     ];
 
     /**

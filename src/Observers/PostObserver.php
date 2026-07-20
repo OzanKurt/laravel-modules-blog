@@ -20,7 +20,14 @@ final class PostObserver
 
     public function updated(Post $post): void
     {
-        PostUpdated::dispatch($post);
+        // Skip PostUpdated when the only mutation is a recorded view, so
+        // analytics bumps do not masquerade as content edits.
+        $changed = array_keys($post->getChanges());
+        $viewOnly = $changed !== [] && array_diff($changed, ['view_count', 'last_viewer_ip', 'updated_at']) === [];
+
+        if (! $viewOnly) {
+            PostUpdated::dispatch($post);
+        }
 
         if ($post->wasChanged('status')) {
             match ($post->status) {

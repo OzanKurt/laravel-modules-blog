@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Database\Factories\Kurt\Modules\Blog;
 
 use Illuminate\Database\Eloquent\Factories\Factory;
-use Kurt\Modules\Blog\Enums\CommentApproval;
 use Kurt\Modules\Blog\Models\Comment;
+use Kurt\Modules\Interactions\Comments\Enums\CommentStatus;
 
 /**
  * @extends Factory<Comment>
@@ -23,14 +23,17 @@ class CommentFactory extends Factory
     {
         return [
             'body' => $this->faker->paragraph(),
-            'approval' => CommentApproval::Pending,
         ];
     }
 
+    /**
+     * Moderation status is not mass-assignable, so force it after creation
+     * rather than passing it through the guarded attributes.
+     */
     public function approved(): static
     {
-        return $this->state(fn () => [
-            'approval' => CommentApproval::Approved,
-        ]);
+        return $this->afterCreating(function (Comment $comment) {
+            $comment->forceFill(['status' => CommentStatus::Published->value])->save();
+        });
     }
 }

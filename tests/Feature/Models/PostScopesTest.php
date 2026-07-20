@@ -35,9 +35,9 @@ it('scopes drafts to draft status posts', function () {
 });
 
 it('orders popular posts by view_count desc', function () {
-    Post::factory()->create(['user_id' => $this->user->id, 'view_count' => 10]);
-    Post::factory()->create(['user_id' => $this->user->id, 'view_count' => 100]);
-    Post::factory()->create(['user_id' => $this->user->id, 'view_count' => 5]);
+    Post::factory()->create(['user_id' => $this->user->id])->forceFill(['view_count' => 10])->save();
+    Post::factory()->create(['user_id' => $this->user->id])->forceFill(['view_count' => 100])->save();
+    Post::factory()->create(['user_id' => $this->user->id])->forceFill(['view_count' => 5])->save();
 
     /** @var array<int, int> $counts */
     $counts = Post::popular()->pluck('view_count')->all();

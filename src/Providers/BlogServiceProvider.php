@@ -33,16 +33,23 @@ final class BlogServiceProvider extends PackageServiceProvider
 
     public function configurePackage(Package $package): void
     {
+        $commands = [
+            PublishDuePostsCommand::class,
+            UpgradeTranslationsCommand::class,
+        ];
+
+        // DemoCommand seeds sample data and must never be reachable in
+        // production; only register it in local/testing environments.
+        if ($this->app->environment('local', 'testing')) {
+            $commands[] = DemoCommand::class;
+        }
+
         $package
             ->name('laravel-modules-blog')
             ->hasConfigFile('blog')
             ->hasTranslations()
             ->discoversMigrations()
-            ->hasCommands([
-                PublishDuePostsCommand::class,
-                UpgradeTranslationsCommand::class,
-                DemoCommand::class,
-            ]);
+            ->hasCommands($commands);
     }
 
     public function packageBooted(): void
