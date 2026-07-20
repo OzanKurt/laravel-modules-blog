@@ -21,6 +21,24 @@ it('returns SEO metadata using title fallback', function () {
     expect($seo->description)->toBe('Sample excerpt');
 });
 
+it('strips HTML and truncates the body multibyte-safely for the description', function () {
+    $user = StubUser::create(['email' => 'a@b.c']);
+    $body = '<p><strong>'.str_repeat('é', 300).'</strong></p>';
+    $post = Post::factory()->create([
+        'user_id' => $user->id,
+        'title' => ['en' => 'Title'],
+        'excerpt' => ['en' => ''],
+        'body' => ['en' => $body],
+    ]);
+
+    $seo = $post->seo();
+
+    expect($seo->description)
+        ->not->toContain('<')
+        ->and(mb_strlen($seo->description))->toBeLessThanOrEqual(163) // 160 chars + Str::limit's '...'
+        ->and(str_starts_with($seo->description, 'é'))->toBeTrue();
+});
+
 it('overrides via meta_title and meta_description', function () {
     $user = StubUser::create(['email' => 'a@b.c']);
     $post = Post::factory()->create([
