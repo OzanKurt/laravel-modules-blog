@@ -34,6 +34,29 @@ it('defaults approval to pending and dispatches events on approve/reject', funct
     Event::assertDispatched(CommentRejected::class);
 });
 
+it('ignores mass-assigned moderation fields on create', function () {
+    $user = StubUser::create(['email' => 'a@b.c']);
+    $moderator = StubUser::create(['email' => 'mod@b.c']);
+    $post = Post::factory()->create(['user_id' => $user->id]);
+
+    $comment = Comment::create([
+        'post_id' => $post->id,
+        'user_id' => $user->id,
+        'body' => 'sneaky',
+        'approval' => 'approved',
+        'status' => 'published',
+        'moderated_by' => $moderator->id,
+        'moderated_at' => now(),
+    ]);
+
+    $comment->refresh();
+
+    expect($comment->approval)->toBe(CommentApproval::Pending)
+        ->and($comment->isApproved())->toBeFalse()
+        ->and($comment->moderated_by)->toBeNull()
+        ->and($comment->moderated_at)->toBeNull();
+});
+
 it('preapproves comments when config enabled', function () {
     config()->set('blog.preapproved_comments', true);
     Event::fake([CommentApproved::class, CommentRejected::class]);

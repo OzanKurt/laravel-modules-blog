@@ -61,10 +61,16 @@ class Post extends Model implements HasMedia
     /** @var list<string> */
     public array $translatable = ['title', 'excerpt', 'body', 'meta_title', 'meta_description'];
 
-    /** @var list<string> */
+    /**
+     * `view_count` and `last_viewer_ip` are intentionally excluded: they are
+     * derived analytics maintained only through recordView(), never through
+     * mass assignment.
+     *
+     * @var list<string>
+     */
     protected $fillable = [
         'slug', 'title', 'excerpt', 'body', 'status', 'type', 'video_url',
-        'user_id', 'category_id', 'view_count', 'last_viewer_ip',
+        'user_id', 'category_id',
         'published_at', 'scheduled_for',
         'meta_title', 'meta_description', 'meta_og_image',
     ];
@@ -238,6 +244,18 @@ class Post extends Model implements HasMedia
         }
 
         return VideoUrl::parse($this->video_url);
+    }
+
+    /**
+     * Record a view: increment the counter and optionally remember the
+     * viewer's IP. This is the only sanctioned way to mutate `view_count`
+     * and `last_viewer_ip` (both are excluded from mass assignment).
+     */
+    public function recordView(?string $ip = null): self
+    {
+        $this->increment('view_count', 1, $ip === null ? [] : ['last_viewer_ip' => $ip]);
+
+        return $this;
     }
 
     public function seo(): SeoMetadata
