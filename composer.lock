@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "443863f6974c8af598b91f785fd07cb5",
+    "content-hash": "6794114d6df2615f8fd9fa2b534e071d",
     "packages": [
         {
             "name": "brick/math",
@@ -2716,22 +2716,22 @@
         },
         {
             "name": "ozankurt/laravel-modules-core",
-            "version": "v2.0.1",
+            "version": "v2.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/OzanKurt/KurtModules-Core.git",
-                "reference": "6d020b89d0998e959f376506462d60f392799dbb"
+                "reference": "f8494de8a22dbd971e1b34d609e6449ea860727d"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/OzanKurt/KurtModules-Core/zipball/6d020b89d0998e959f376506462d60f392799dbb",
-                "reference": "6d020b89d0998e959f376506462d60f392799dbb",
+                "url": "https://api.github.com/repos/OzanKurt/KurtModules-Core/zipball/f8494de8a22dbd971e1b34d609e6449ea860727d",
+                "reference": "f8494de8a22dbd971e1b34d609e6449ea860727d",
                 "shasum": ""
             },
             "require": {
-                "illuminate/contracts": "^12.0 || ^13.0",
-                "illuminate/database": "^12.0 || ^13.0",
-                "illuminate/support": "^12.0 || ^13.0",
+                "illuminate/contracts": "^12.0",
+                "illuminate/database": "^12.0",
+                "illuminate/support": "^12.0",
                 "php": "^8.3",
                 "spatie/laravel-package-tools": "^1.92"
             },
@@ -2796,10 +2796,10 @@
                 "laravel"
             ],
             "support": {
-                "source": "https://github.com/OzanKurt/KurtModules-Core/tree/v2.0.1",
+                "source": "https://github.com/OzanKurt/KurtModules-Core/tree/v2.2.0",
                 "issues": "https://github.com/OzanKurt/KurtModules-Core/issues"
             },
-            "time": "2026-06-28T22:57:52+00:00"
+            "time": "2026-07-20T20:48:49+00:00"
         },
         {
             "name": "ozankurt/laravel-modules-interactions",

@@ -74,5 +74,11 @@ final class BlogServiceProvider extends PackageServiceProvider
                     ->cron((string) config('blog.scheduler.cron', '* * * * *'));
             });
         }
+
+        // Register the module's REST API. This is a no-op unless
+        // `blog.http.mode` is `api` or `ui`; when enabled it wires the
+        // `blog-api` rate limiter and loads routes/api.php inside the
+        // config-driven route group (prefix + throttle).
+        $this->registerModuleApi(__DIR__.'/../../routes/api.php');
     }
 }

@@ -17,6 +17,19 @@ All notable changes follow [Keep a Changelog](https://keepachangelog.com/en/1.1.
   categories with published posts, and (opt-in) tags, for the app to feed into
   its own sitemap.
 - `feed` and `sitemap` default blocks in `config/blog.php`.
+- **REST API** — an opt-in JSON API built on the Core API kit
+  (`ozankurt/laravel-modules-core` ^2.2). Full REST for posts, categories, tags
+  and comments plus `publish`/`unpublish`/`related` post actions. Reads are
+  public and respect the published scope; writes require auth and are guarded by
+  the module Policies. Safe by default: nothing registers unless
+  `BLOG_HTTP_MODE=api`. Adds the `http` block to `config/blog.php`, a
+  `routes/api.php` file, Resources, FormRequests and controllers under
+  `src/Http`.
+
+### Fixed
+- Policies now resolve the access gate via the `Gate` contract instead of the
+  unbound `app('gate')` container alias, so the `canManageBlog` staff check works
+  when a Policy is invoked (previously unreachable in the headless module).
 
 ## [2.2.1] - 2026-05-31
 

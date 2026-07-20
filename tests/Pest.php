@@ -5,9 +5,15 @@ declare(strict_types=1);
 use Filament\Forms\Form;
 use Filament\Schemas\Schema;
 use Filament\Tables\Table;
+use Kurt\Modules\Blog\Tests\ApiTestCase;
 use Kurt\Modules\Blog\Tests\TestCase;
 
 pest()->extend(TestCase::class)->in('Feature');
+
+// The REST API suite lives in its own directory (sibling to Feature so it does
+// not overlap the Feature-wide binding above) and uses ApiTestCase, which flips
+// blog.http.mode to `api` before the providers boot so routes/api.php registers.
+pest()->extend(ApiTestCase::class)->in('Api');
 
 /*
 |--------------------------------------------------------------------------
