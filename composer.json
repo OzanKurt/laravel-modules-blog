@@ -20,8 +20,8 @@
     "illuminate/contracts": "^12.0 || ^13.0",
     "illuminate/database": "^12.0 || ^13.0",
     "illuminate/support": "^12.0 || ^13.0",
-    "ozankurt/laravel-modules-core": "^2.2",
-    "ozankurt/laravel-modules-interactions": "^1.3",
+    "ozankurt/laravel-modules-core": "^1.0",
+    "ozankurt/laravel-modules-interactions": "^1.0",
     "spatie/laravel-medialibrary": "^11.0",
     "spatie/laravel-package-tools": "^1.92",
     "spatie/laravel-translatable": "^6.11"
