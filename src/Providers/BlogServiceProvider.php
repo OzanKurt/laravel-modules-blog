@@ -21,6 +21,7 @@ use Kurt\Modules\Blog\Policies\CategoryPolicy;
 use Kurt\Modules\Blog\Policies\CommentPolicy;
 use Kurt\Modules\Blog\Policies\PostPolicy;
 use Kurt\Modules\Blog\Policies\TagPolicy;
+use Kurt\Modules\Core\Modules\ModuleManifest;
 use Kurt\Modules\Core\Providers\PackageServiceProvider;
 use Spatie\LaravelPackageTools\Package;
 
@@ -52,8 +53,17 @@ final class BlogServiceProvider extends PackageServiceProvider
             ->hasCommands($commands);
     }
 
+    protected function moduleManifest(): ?ModuleManifest
+    {
+        return ModuleManifest::make('blog')
+            ->name('Blog')
+            ->description('Headless blog module for Laravel with scheduled publishing, SEO, translations, and Filament admin.');
+    }
+
     public function packageBooted(): void
     {
+        parent::packageBooted();
+
         Post::observe(PostObserver::class);
         Comment::observe(CommentObserver::class);
         Category::observe(CategoryObserver::class);

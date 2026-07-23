@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "6794114d6df2615f8fd9fa2b534e071d",
+    "content-hash": "026a1c67704d0fa11c2b86a75c261b3c",
     "packages": [
         {
             "name": "brick/math",
@@ -2716,16 +2716,16 @@
         },
         {
             "name": "ozankurt/laravel-modules-core",
-            "version": "v2.2.0",
+            "version": "v1.1.0",
             "source": {
                 "type": "git",
-                "url": "https://github.com/OzanKurt/KurtModules-Core.git",
-                "reference": "f8494de8a22dbd971e1b34d609e6449ea860727d"
+                "url": "https://github.com/OzanKurt/laravel-modules-core.git",
+                "reference": "9efa6f42dc023ada9ec9e9ace081afba23417992"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/OzanKurt/KurtModules-Core/zipball/f8494de8a22dbd971e1b34d609e6449ea860727d",
-                "reference": "f8494de8a22dbd971e1b34d609e6449ea860727d",
+                "url": "https://api.github.com/repos/OzanKurt/laravel-modules-core/zipball/9efa6f42dc023ada9ec9e9ace081afba23417992",
+                "reference": "9efa6f42dc023ada9ec9e9ace081afba23417992",
                 "shasum": ""
             },
             "require": {
@@ -2796,23 +2796,23 @@
                 "laravel"
             ],
             "support": {
-                "source": "https://github.com/OzanKurt/KurtModules-Core/tree/v2.2.0",
-                "issues": "https://github.com/OzanKurt/KurtModules-Core/issues"
+                "source": "https://github.com/OzanKurt/laravel-modules-core/tree/v1.1.0",
+                "issues": "https://github.com/OzanKurt/laravel-modules-core/issues"
             },
-            "time": "2026-07-20T20:48:49+00:00"
+            "time": "2026-07-23T21:56:36+00:00"
         },
         {
             "name": "ozankurt/laravel-modules-interactions",
-            "version": "v1.3.0",
+            "version": "v1.3.1",
             "source": {
                 "type": "git",
-                "url": "https://github.com/OzanKurt/KurtModules-Interactions.git",
-                "reference": "6b2ab6f3caddfe5cf47888bf14f47e50e3d09f84"
+                "url": "https://github.com/OzanKurt/laravel-modules-interactions.git",
+                "reference": "bb9f8958c30316c9dadacd5b1cdba87a1cba4491"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/OzanKurt/KurtModules-Interactions/zipball/6b2ab6f3caddfe5cf47888bf14f47e50e3d09f84",
-                "reference": "6b2ab6f3caddfe5cf47888bf14f47e50e3d09f84",
+                "url": "https://api.github.com/repos/OzanKurt/laravel-modules-interactions/zipball/bb9f8958c30316c9dadacd5b1cdba87a1cba4491",
+                "reference": "bb9f8958c30316c9dadacd5b1cdba87a1cba4491",
                 "shasum": ""
             },
             "require": {
@@ -2820,8 +2820,8 @@
                 "illuminate/database": "^12.0 || ^13.0",
                 "illuminate/support": "^12.0 || ^13.0",
                 "league/commonmark": "^2.4",
-                "ozankurt/laravel-modules-core": "^2.0",
-                "php": "^8.4",
+                "ozankurt/laravel-modules-core": "^1.0",
+                "php": "^8.3",
                 "spatie/laravel-package-tools": "^1.92"
             },
             "require-dev": {
@@ -2889,10 +2889,10 @@
                 "social"
             ],
             "support": {
-                "source": "https://github.com/OzanKurt/KurtModules-Interactions/tree/v1.3.0",
-                "issues": "https://github.com/OzanKurt/KurtModules-Interactions/issues"
+                "source": "https://github.com/OzanKurt/laravel-modules-interactions/tree/v1.3.1",
+                "issues": "https://github.com/OzanKurt/laravel-modules-interactions/issues"
             },
-            "time": "2026-05-31T09:21:31+00:00"
+            "time": "2026-07-23T22:26:30+00:00"
         },
         {
             "name": "phpoption/phpoption",
