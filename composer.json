@@ -58,7 +58,7 @@
   "repositories": {
     "interactions": {
       "type": "vcs",
-      "url": "https://github.com/OzanKurt/KurtModules-Interactions"
+      "url": "https://github.com/OzanKurt/laravel-modules-interactions"
     },
     "0": {
       "type": "vcs",
